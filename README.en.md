@@ -26,6 +26,10 @@ Prism is a simple app for macOS and Windows that connects to any WireGuard serve
 - **Light and dark themes.** Follows the system or set by hand.
 - **Lives in the tray.** Closing the window doesn't drop the VPN.
 
+## Download
+
+The latest version for macOS and Windows is on the [Releases](https://github.com/vlppz/prism/releases/latest) page.
+
 ## How to use
 
 1. Install Prism.
@@ -36,5 +40,5 @@ On first connect, macOS asks for your administrator password once so Prism can s
 
 ## Requirements
 
-- macOS 11 or later (Apple Silicon)
+- macOS 11 or later (Apple Silicon and Intel)
 - Windows 10 or 11 (64-bit)

@@ -26,6 +26,10 @@ Prism — простое приложение для macOS и Windows, кото�
 - **Светлая и тёмная тема.** Следует системной или выбирается вручную.
 - **Живёт в трее.** Закрытое окно не обрывает VPN.
 
+## Скачать
+
+Последняя версия для macOS и Windows — на странице [Releases](https://github.com/vlppz/prism/releases/latest).
+
 ## Как пользоваться
 
 1. Установите Prism.
@@ -36,5 +40,5 @@ Prism — простое приложение для macOS и Windows, кото�
 
 ## Системные требования
 
-- macOS 11 или новее (Apple Silicon)
+- macOS 11 или новее (Apple Silicon и Intel)
 - Windows 10 или 11 (64-бит)
