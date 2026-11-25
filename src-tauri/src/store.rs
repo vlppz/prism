@@ -178,6 +178,18 @@ impl Store {
         })
     }
 
+    pub fn rename(&self, id: &str, name: &str) -> Result<Index> {
+        let name = name.trim();
+        if name.is_empty() {
+            bail!("the name can't be empty");
+        }
+        let mut index = self.index();
+        let item = index.items.iter_mut().find(|i| i.id == id).context("no such server")?;
+        item.name = name.chars().take(60).collect();
+        self.save(&index)?;
+        Ok(index)
+    }
+
     pub fn set_country(&self, id: &str, country: &str) -> Result<Index> {
         let cc = country.to_ascii_lowercase();
         if cc.len() != 2 || !cc.bytes().all(|b| b.is_ascii_lowercase()) {

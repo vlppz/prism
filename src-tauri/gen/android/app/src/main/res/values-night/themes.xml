@@ -1,0 +1,7 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.prism" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- the page's own background, so launch never flashes another colour -->
+        <item name="android:windowBackground">@color/prism_bg</item>
+    </style>
+</resources>

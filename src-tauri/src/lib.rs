@@ -1,5 +1,12 @@
 //! Prism app: config list, one connect button, tray.
 
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+mod android_core;
+#[cfg(any(target_os = "android", test))]
+mod plan;
+mod qr;
 mod store;
 mod vpn;
 
@@ -8,12 +15,17 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use prism_engine::{Event, Phase};
 use serde::Serialize;
+#[cfg(desktop)]
 use tauri::image::Image;
+#[cfg(desktop)]
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 #[cfg(target_os = "macos")]
 use tauri::menu::Submenu;
+#[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent, Wry};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+#[cfg(desktop)]
+use tauri::{WindowEvent, Wry};
 use tokio::sync::mpsc;
 
 use store::{Index, Item, Store};
@@ -44,6 +56,7 @@ struct AppState {
     session: tokio::sync::Mutex<Option<Session>>,
     status: parking_lot::Mutex<Status>,
     generation: AtomicU64,
+    #[cfg(desktop)]
     tray_toggle: parking_lot::Mutex<Option<MenuItem<Wry>>>,
 }
 
@@ -58,10 +71,13 @@ fn set_status(app: &AppHandle, f: impl FnOnce(&mut Status)) {
         f(&mut s);
         s.clone()
     };
-    if let Some(item) = state.tray_toggle.lock().as_ref() {
-        let _ = item.set_text(if snapshot.state == "off" { "Connect" } else { "Disconnect" });
+    #[cfg(desktop)]
+    {
+        if let Some(item) = state.tray_toggle.lock().as_ref() {
+            let _ = item.set_text(if snapshot.state == "off" { "Connect" } else { "Disconnect" });
+        }
+        set_tray_icon(app, snapshot.state == "connected");
     }
-    set_tray_icon(app, snapshot.state == "connected");
     let _ = app.emit("status", snapshot);
 }
 
@@ -98,9 +114,11 @@ fn select(state: State<'_, AppState>, id: String) -> CmdResult<Index> {
 #[tauri::command]
 fn set_theme(app: AppHandle, state: State<'_, AppState>, theme: String) -> CmdResult<Index> {
     let index = state.store.set_theme(&theme).map_err(err)?;
+    #[cfg(desktop)]
     if let Some(w) = app.get_webview_window("main") {
         apply_theme(&w, &theme);
     }
+    let _ = &app;
     Ok(index)
 }
 
@@ -113,6 +131,8 @@ fn open_github() {
     let _ = std::process::Command::new("open").arg(GITHUB).spawn();
     #[cfg(windows)]
     let _ = std::process::Command::new("explorer").arg(GITHUB).spawn();
+    #[cfg(target_os = "android")]
+    android::open_url(GITHUB);
 }
 
 /// Turns smart routing on or off; a live tunnel reconnects to apply it.
@@ -142,8 +162,79 @@ async fn server_ip(state: State<'_, AppState>, id: String) -> CmdResult<String> 
 }
 
 #[tauri::command]
+fn rename(state: State<'_, AppState>, id: String, name: String) -> CmdResult<Index> {
+    state.store.rename(&id, &name).map_err(err)
+}
+
+#[tauri::command]
 fn set_country(state: State<'_, AppState>, id: String, country: String) -> CmdResult<Index> {
     state.store.set_country(&id, &country).map_err(err)
+}
+
+/// The text of the QR code in a picture (the page sends the file's bytes).
+#[tauri::command]
+async fn decode_qr(request: tauri::ipc::Request<'_>) -> CmdResult<String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("expected the picture's bytes".into());
+    };
+    let bytes = bytes.clone();
+    tauri::async_runtime::spawn_blocking(move || qr::decode(&bytes)).await.map_err(err)?.map_err(err)
+}
+
+/// Android: scans a QR code with the camera; None if the user backed out.
+#[tauri::command]
+async fn scan_qr() -> CmdResult<Option<String>> {
+    #[cfg(target_os = "android")]
+    return android::scan_qr().await.map_err(err);
+    #[cfg(not(target_os = "android"))]
+    Err("not supported here".into())
+}
+
+/// Android: the Quick Settings tile opened Prism to connect.
+#[tauri::command]
+async fn take_connect() -> bool {
+    #[cfg(target_os = "android")]
+    return android::take_connect().await.unwrap_or(false);
+    #[cfg(not(target_os = "android"))]
+    false
+}
+
+/// Android: offers to add Prism's tile to Quick Settings.
+#[tauri::command]
+async fn add_tile() -> CmdResult<String> {
+    #[cfg(target_os = "android")]
+    return android::add_tile().await.map_err(err);
+    #[cfg(not(target_os = "android"))]
+    Err("not supported here".into())
+}
+
+/// Android: the clipboard's text (pages can't read it without a prompt).
+#[tauri::command]
+async fn paste_text() -> CmdResult<String> {
+    #[cfg(target_os = "android")]
+    return android::clipboard().await.map_err(err);
+    #[cfg(not(target_os = "android"))]
+    Err("not supported here".into())
+}
+
+/// Android: a config another app opened with Prism ("Open with", "Share"),
+/// as (text, file name). Imported by the page like a dropped file.
+#[tauri::command]
+async fn take_opened() -> CmdResult<Option<(String, Option<String>)>> {
+    #[cfg(target_os = "android")]
+    {
+        use base64::Engine;
+        let o = android::take_opened().await.map_err(err)?;
+        if let Some(b64) = o.image {
+            let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(err)?;
+            let text = tauri::async_runtime::spawn_blocking(move || qr::decode(&bytes)).await.map_err(err)?.map_err(err)?;
+            // the picture's name says nothing about the server
+            return Ok(Some((text, None)));
+        }
+        return Ok(o.text.filter(|t| !t.trim().is_empty()).map(|t| (t, o.name)));
+    }
+    #[cfg(not(target_os = "android"))]
+    Ok(None)
 }
 
 #[tauri::command]
@@ -157,6 +248,28 @@ async fn connect(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
 }
 
 async fn do_connect(app: &AppHandle, state: &AppState) -> CmdResult<()> {
+    // Android: the VPN service owns the session; status comes back through
+    // the core's hook (see `run`)
+    #[cfg(target_os = "android")]
+    {
+        if android_core::is_running() {
+            return Ok(());
+        }
+        let index = state.store.index();
+        let id = index.selected.ok_or("import a WireGuard config first")?;
+        set_status(app, |s| *s = Status { state: "connecting", config_id: Some(id), ..Default::default() });
+        let started = async {
+            android::prepare().await?;
+            android::connect().await
+        };
+        if let Err(e) = started.await {
+            let msg = e.to_string();
+            set_status(app, |s| *s = Status { state: "off", config_id: s.config_id.take(), error: Some(msg.clone()), since: None });
+            return Err(msg);
+        }
+        return Ok(());
+    }
+    #[allow(unreachable_code)]
     let mut slot = state.session.lock().await;
     if slot.is_some() {
         return Ok(());
@@ -191,6 +304,14 @@ async fn disconnect(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()>
 }
 
 async fn do_disconnect(app: &AppHandle, state: &AppState) {
+    #[cfg(target_os = "android")]
+    {
+        let _ = state;
+        android_core::stop().await;
+        set_status(app, |s| *s = Status { state: "off", config_id: s.config_id.take(), error: None, since: None });
+        return;
+    }
+    #[allow(unreachable_code)]
     // a new generation makes the old session's late events irrelevant
     state.generation.fetch_add(1, Ordering::SeqCst);
     let session = state.session.lock().await.take();
@@ -238,6 +359,8 @@ fn platform() -> &'static str {
         "macos"
     } else if cfg!(windows) {
         "windows"
+    } else if cfg!(target_os = "android") {
+        "android"
     } else {
         "other"
     }
@@ -249,11 +372,12 @@ fn platform() -> &'static str {
 const TRAY_OFF: &[u8] = include_bytes!("../icons/tray-mac-off.png");
 #[cfg(target_os = "macos")]
 const TRAY_ON: &[u8] = include_bytes!("../icons/tray-mac-on.png");
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(desktop, not(target_os = "macos")))]
 const TRAY_OFF: &[u8] = include_bytes!("../icons/tray-win-off.png");
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(desktop, not(target_os = "macos")))]
 const TRAY_ON: &[u8] = include_bytes!("../icons/tray-win-on.png");
 
+#[cfg(desktop)]
 fn set_tray_icon(app: &AppHandle, on: bool) {
     let Some(tray) = app.tray_by_id("main") else { return };
     if let Ok(img) = Image::from_bytes(if on { TRAY_ON } else { TRAY_OFF }) {
@@ -265,6 +389,7 @@ fn set_tray_icon(app: &AppHandle, on: bool) {
 }
 
 /// Hides the window and (on macOS) the Dock icon; Prism keeps running in the tray.
+#[cfg(desktop)]
 fn hide_to_tray(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.hide();
@@ -273,6 +398,7 @@ fn hide_to_tray(app: &AppHandle) {
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 }
 
+#[cfg(desktop)]
 fn show_main(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
@@ -289,6 +415,7 @@ async fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+#[cfg(desktop)]
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let toggle = MenuItem::with_id(app, "toggle", "Connect", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "Show Prism", true, None::<&str>)?;
@@ -382,6 +509,7 @@ fn app_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 /// launch and resizes never flash the other theme.
 /// Pins the window (and so the page's prefers-color-scheme) to a theme, or
 /// hands it back to the system.
+#[cfg(desktop)]
 fn apply_theme(w: &tauri::WebviewWindow, theme: &str) {
     let forced = match theme {
         "light" => Some(tauri::Theme::Light),
@@ -393,6 +521,7 @@ fn apply_theme(w: &tauri::WebviewWindow, theme: &str) {
     let _ = w.set_background_color(Some(background(now)));
 }
 
+#[cfg(desktop)]
 fn background(theme: tauri::Theme) -> tauri::window::Color {
     match theme {
         tauri::Theme::Light => tauri::window::Color(243, 243, 246, 255),
@@ -400,12 +529,36 @@ fn background(theme: tauri::Theme) -> tauri::window::Color {
     }
 }
 
+/// Android: mirrors the session the VPN service runs (it may have started
+/// from the tile, or before this window existed).
+#[cfg(target_os = "android")]
+fn follow_android_session(app: &AppHandle) {
+    fn apply(app: &AppHandle, snap: android_core::Snap) {
+        set_status(app, |s| {
+            *s = Status { state: snap.state, config_id: snap.config_id, error: snap.error, since: snap.since }
+        });
+    }
+    let handle = app.clone();
+    android_core::set_hook(move |note| match note {
+        android_core::Note::Status(snap) => apply(&handle, snap),
+        android_core::Note::Stats { rx, tx, handshake_age, level } => {
+            let _ = handle.emit("stats", Stats { rx, tx, handshake_age, level });
+        }
+    });
+    let snap = android_core::snapshot();
+    if snap.state != "off" {
+        apply(app, snap);
+    }
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
     // The app menu exists only on macOS (on Windows it would draw a menu bar).
     #[cfg(target_os = "macos")]
     let builder = builder.menu(app_menu);
-    let app = builder
+    #[cfg(desktop)]
+    let builder = builder
         .on_menu_event(|app, e| match e.id.as_ref() {
             "hide-to-tray" | "hide-to-tray-w" => hide_to_tray(app),
             "quit-all" => {
@@ -414,22 +567,6 @@ pub fn run() {
             _ => {}
         })
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_main(app)))
-        .setup(|app| {
-            let dir = app.path().app_data_dir()?;
-            let store = Store::open(dir)?;
-            app.manage(AppState {
-                store,
-                session: Default::default(),
-                status: parking_lot::Mutex::new(Status { state: "off", ..Default::default() }),
-                generation: AtomicU64::new(0),
-                tray_toggle: Default::default(),
-            });
-            setup_tray(app.handle())?;
-            if let Some(w) = app.get_webview_window("main") {
-                apply_theme(&w, &app.state::<AppState>().store.index().theme);
-            }
-            Ok(())
-        })
         .on_window_event(|window, event| match event {
             // Closing the window keeps Prism (and the tunnel) running in the tray.
             WindowEvent::CloseRequested { api, .. } => {
@@ -440,6 +577,31 @@ pub fn run() {
                 let _ = window.set_background_color(Some(background(*theme)));
             }
             _ => {}
+        });
+    #[cfg(target_os = "android")]
+    let builder = builder.plugin(android::init());
+    let app = builder
+        .setup(|app| {
+            let dir = app.path().app_data_dir()?;
+            let store = Store::open(dir)?;
+            app.manage(AppState {
+                store,
+                session: Default::default(),
+                status: parking_lot::Mutex::new(Status { state: "off", ..Default::default() }),
+                generation: AtomicU64::new(0),
+                #[cfg(desktop)]
+                tray_toggle: Default::default(),
+            });
+            #[cfg(target_os = "android")]
+            follow_android_session(app.handle());
+            #[cfg(desktop)]
+            {
+                setup_tray(app.handle())?;
+                if let Some(w) = app.get_webview_window("main") {
+                    apply_theme(&w, &app.state::<AppState>().store.index().theme);
+                }
+            }
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             list,
@@ -456,7 +618,14 @@ pub fn run() {
             open_github,
             set_smart,
             server_ip,
-            set_country
+            set_country,
+            paste_text,
+            take_opened,
+            decode_qr,
+            scan_qr,
+            take_connect,
+            add_tile,
+            rename
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prism");

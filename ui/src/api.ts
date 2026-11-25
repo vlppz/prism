@@ -50,11 +50,24 @@ export interface Api {
   status(): Promise<Status>;
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  platform(): Promise<"macos" | "windows" | "other">;
+  platform(): Promise<"macos" | "windows" | "android" | "other">;
+  /** Android: clipboard text, read natively (no page prompt). */
+  pasteText(): Promise<string>;
+  /** Android: a config opened with Prism from another app, once. */
+  takeOpened(): Promise<[string, string | null] | null>;
+  /** The text of the QR code in a picture. */
+  decodeQr(image: Uint8Array): Promise<string>;
+  /** Android: camera QR scan; null if the user backed out. */
+  scanQr(): Promise<string | null>;
+  /** Android: the Quick Settings tile opened Prism to connect. */
+  takeConnect(): Promise<boolean>;
+  /** Android: offers the Quick Settings tile. */
+  addTile(): Promise<"added" | "already" | "declined" | "manual">;
   setTheme(theme: Theme): Promise<Index>;
   setSmart(on: boolean): Promise<Index>;
   details(id: string): Promise<Details>;
   serverIp(id: string): Promise<string>;
+  rename(id: string, name: string): Promise<Index>;
   setCountry(id: string, country: string): Promise<Index>;
   version(): Promise<string>;
   quit(): void;
@@ -81,11 +94,18 @@ async function tauriApi(): Promise<Api> {
     connect: () => invoke("connect"),
     disconnect: () => invoke("disconnect"),
     platform: () => invoke("platform"),
+    pasteText: () => invoke("paste_text"),
+    takeOpened: () => invoke("take_opened"),
+    decodeQr: (image) => invoke("decode_qr", image),
+    scanQr: () => invoke("scan_qr"),
+    takeConnect: () => invoke("take_connect"),
+    addTile: () => invoke("add_tile"),
     setTheme: (theme) => invoke("set_theme", { theme }),
     setSmart: (on) => invoke("set_smart", { on }),
     details: (id) => invoke("details", { id }),
     serverIp: (id) => invoke("server_ip", { id }),
     setCountry: (id, country) => invoke("set_country", { id, country }),
+    rename: (id, name) => invoke("rename", { id, name }),
     version: () => getVersion(),
     quit: () => void invoke("quit_app"),
     openGithub: () => void invoke("open_github"),
@@ -151,12 +171,21 @@ function mockApi(): Api {
       setTimeout(() => set({ state: "connected", since: Date.now() }), 2200);
     },
     disconnect: async () => set({ state: "off", configId: null, since: null }),
-    platform: async () => (demo.get("win") ? "windows" : "macos"),
+    platform: async () => (demo.get("win") ? "windows" : demo.has("android") ? "android" : "macos"),
+    pasteText: async () => "",
+    takeOpened: async () => null,
+    decodeQr: async () => {
+      throw "no QR code found in this picture";
+    },
+    scanQr: async () => null,
+    takeConnect: async () => false,
+    addTile: async () => "manual",
     setTheme: async (theme) => (index = { ...index, theme }),
     setSmart: async (smart) => (index = { ...index, smart }),
     serverIp: async () => "192.0.2.1",
     setCountry: async (id, country) =>
       (index = { ...index, items: index.items.map((i) => (i.id === id ? { ...i, country } : i)) }),
+    rename: async (id, name) => (index = { ...index, items: index.items.map((i) => (i.id === id ? { ...i, name } : i)) }),
     details: async (id) => ({
       publicKey: "kQ3v8yJ0m2cRZb7xPq1Lw9sTn4uVfE6hGdA5oKiMcXY=",
       addresses: "10.14.0.2/16",

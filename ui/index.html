@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="dark light" />
     <title>Prism</title>
     <link rel="stylesheet" href="/src/style.css" />
@@ -113,6 +113,13 @@
         </span>
         <span class="switch" aria-hidden="true"><span class="knob"></span></span>
       </button>
+      <button class="toggle-row tile-row" id="addTile" type="button">
+        <span class="tr-text">
+          <span class="tr-title">Quick Settings tile</span>
+          <span class="tr-sub">Connect and disconnect from the notification shade</span>
+        </span>
+        <svg class="tr-go" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+      </button>
       <div class="set-foot">
         <span class="set-ver"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.8L12.6 11.6H1.4Z" /></svg>Prism <span id="ver"></span></span>
         <span class="set-actions">
@@ -122,14 +129,23 @@
       </div>
     </div>
 
+    <div class="rename" id="rename" role="dialog" aria-label="Rename server">
+      <div class="set-label">Rename server</div>
+      <input class="rename-input" id="renameInput" type="text" maxlength="60" autocomplete="off" spellcheck="false" enterkeyhint="done" />
+      <div class="rename-actions">
+        <button class="rename-btn" id="renameCancel" type="button">Cancel</button>
+        <button class="rename-btn primary" id="renameSave" type="button">Save</button>
+      </div>
+    </div>
+
     <div class="drop" id="drop" aria-hidden="true">
       <div class="drop-inner">
         <svg viewBox="0 0 28 28"><path d="M14 5v13M8.5 12.5L14 18l5.5-5.5M6 23h16" /></svg>
         <span>Drop to import</span>
-        <small>WireGuard .conf</small>
+        <small>WireGuard .conf or QR code</small>
       </div>
     </div>
-    <input type="file" id="file" accept=".conf,text/plain" multiple hidden />
+    <input type="file" id="file" accept=".conf,text/plain,image/*" multiple hidden />
 
     <script type="module" src="/src/main.ts"></script>
   </body>

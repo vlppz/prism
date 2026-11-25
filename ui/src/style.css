@@ -1862,3 +1862,181 @@ button.kv:focus-visible {
     transition: none !important;
   }
 }
+
+/* ---------- Android ---------- */
+
+/* main.ts zooms the page to the phone (--k) and measures the system bars
+   (--sa-top, --sa-bottom, already divided by the zoom) */
+.os-android .set-quit {
+  display: none;
+}
+.os-android .titlebar {
+  top: var(--sa-top, 0px);
+  height: 50px;
+}
+.os-android .wordmark {
+  font-size: 15px;
+  gap: 7px;
+}
+.os-android .wordmark svg {
+  width: 13px;
+  height: 13px;
+}
+.os-android main {
+  padding-top: calc(var(--sa-top, 0px) + 50px);
+}
+.os-android .dock {
+  padding-bottom: var(--sa-bottom, 0px);
+}
+.os-android .settings {
+  top: calc(var(--sa-top, 0px) + 50px);
+}
+/* the settings button: a finger-sized target */
+.os-android .winbtns {
+  top: 3px;
+  right: 6px;
+}
+.os-android .winbtn {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+.os-android #gear svg {
+  width: 20px;
+  height: 20px;
+  stroke-width: 1.15;
+}
+/* bigger small print */
+.os-android .tr-sub,
+.os-android .set-label {
+  font-size: 12px;
+}
+.os-android .tr-title {
+  font-size: 14px;
+}
+/* touch has no hover: the row's buttons always show */
+.os-android .rm {
+  opacity: 1;
+  width: 34px;
+  height: 34px;
+}
+.os-android .rm svg {
+  width: 11px;
+  height: 11px;
+}
+/* with no servers yet the import rows stand alone: no divider above them */
+.os-android .rows:empty + .row.add {
+  margin-top: 0;
+}
+.os-android .rows:empty + .row.add::after {
+  display: none;
+}
+/* blurring what's under the glass is costly on phones and barely shows
+   through these near-opaque panels */
+.os-android * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+/* launch: main.ts lifts a cover instead of fading the page in */
+.os-android {
+  transition: none;
+}
+
+/* rename (phones): a panel like Settings */
+.rename {
+  position: absolute;
+  top: calc(var(--sa-top, 0px) + 50px);
+  left: 12px;
+  right: 12px;
+  z-index: 26;
+  padding: 14px 14px 12px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, rgba(27, 27, 33, 0.96), rgba(10, 10, 13, 0.98));
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.8), 0 8px 24px rgba(0, 0, 0, 0.5);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-10px) scale(0.97);
+  transition: opacity 0.22s var(--ease), transform 0.3s var(--ease), visibility 0s 0.3s;
+}
+.rename-open .rename {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition: opacity 0.25s var(--ease), transform 0.5s var(--spring);
+}
+.rename-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 14px;
+  outline: none;
+  font: 500 15px/1 var(--text);
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.rename-input:focus {
+  box-shadow: inset 0 0 0 1.5px rgba(160, 107, 255, 0.7);
+}
+.rename-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.rename-btn {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--ink-2);
+}
+.rename-btn.primary {
+  color: #fff;
+  background: linear-gradient(135deg, var(--pink), var(--violet) 55%, var(--blue));
+}
+.light .rename {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(247, 247, 250, 0.98));
+  box-shadow: 0 30px 80px rgba(40, 30, 90, 0.16), 0 8px 24px rgba(20, 20, 40, 0.08);
+}
+.light .rename-input {
+  background: rgba(20, 20, 40, 0.045);
+  box-shadow: inset 0 0 0 1px rgba(20, 20, 40, 0.06);
+}
+.tile-row {
+  display: none;
+  margin-top: 8px;
+}
+.os-android .tile-row {
+  display: flex;
+}
+.tr-go {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.os-android .titlebar {
+  top: env(safe-area-inset-top, 0px);
+  height: 48px;
+}
+.os-android .wordmark {
+  font-size: 14px;
+}
+.os-android main {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 48px);
+}
+.os-android .dock {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.os-android .settings {
+  top: calc(env(safe-area-inset-top, 0px) + 48px);
+}

@@ -21,7 +21,9 @@ use parking_lot::Mutex;
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
-use tun_rs::{AsyncDevice, DeviceBuilder};
+use tun_rs::AsyncDevice;
+#[cfg(not(target_os = "android"))]
+use tun_rs::DeviceBuilder;
 
 use crate::config::{Awg, WgConfig};
 use crate::net::{self, Phys};
@@ -38,6 +40,11 @@ pub struct Options {
     pub wintun_path: Option<String>,
     /// Smart routing: Russian networks go straight out, not through the tunnel.
     pub smart: bool,
+    /// Android: the TUN descriptor from `VpnService.Builder.establish()`. The
+    /// system already set its addresses, routes and DNS. Owned here, so the VPN
+    /// interface goes away with the session whichever way it ends.
+    #[cfg(target_os = "android")]
+    pub tun_fd: std::os::fd::OwnedFd,
 }
 
 pub type Events = mpsc::UnboundedSender<Event>;
@@ -154,6 +161,15 @@ pub async fn run(cfg: WgConfig, opts: Options, ev: Events, mut stop: watch::Rece
     result
 }
 
+#[cfg(target_os = "android")]
+fn create_tun(_cfg: &WgConfig, opts: &Options) -> Result<AsyncDevice> {
+    use std::os::fd::IntoRawFd;
+    let fd = opts.tun_fd.try_clone()?.into_raw_fd();
+    // SAFETY: a fresh duplicate that nothing else uses.
+    Ok(unsafe { AsyncDevice::from_fd(fd) }?)
+}
+
+#[cfg(not(target_os = "android"))]
 fn create_tun(cfg: &WgConfig, opts: &Options) -> Result<AsyncDevice> {
     let mut b = DeviceBuilder::new().mtu(cfg.mtu.unwrap_or(1420));
     if let Some(a) = cfg.addresses.iter().find(|a| a.addr.is_ipv4()) {
@@ -187,6 +203,12 @@ fn create_tun(cfg: &WgConfig, opts: &Options) -> Result<AsyncDevice> {
 }
 
 fn tun_ids(tun: &AsyncDevice) -> Result<(String, u32)> {
+    #[cfg(target_os = "android")]
+    let name = {
+        let _ = tun;
+        "the VPN interface".to_string()
+    };
+    #[cfg(not(target_os = "android"))]
     let name = tun.name().context("reading interface name")?;
     #[cfg(windows)]
     let index = tun.if_index().context("reading interface index")?;
@@ -200,6 +222,7 @@ enum Outcome {
     Stalled,
     Unreachable,
     Dead,
+    NetworkChanged,
     Failed(String),
 }
 
@@ -288,6 +311,7 @@ async fn supervise(
                 set_phase(Phase::Connecting);
                 log(ev, "session expired — reconnecting");
             }
+            Outcome::NetworkChanged => log(ev, "network changed — reconnecting"),
             Outcome::Failed(e) => {
                 failures += 1;
                 if failures >= 3 {
@@ -379,6 +403,9 @@ async fn watch_link(
             Some(e) = link.fail_rx.recv() => return Outcome::Failed(e),
             _ = tick.tick() => {}
         }
+        if net::network_epoch() != link.epoch {
+            return Outcome::NetworkChanged;
+        }
         let (hs, tx, rx, _, _) = link.tunn.lock().stats();
         let (tx, rx) = (tx as u64, rx as u64);
         emit(
@@ -441,6 +468,8 @@ struct Link {
     tasks: Vec<JoinHandle<()>>,
     fail_rx: mpsc::Receiver<String>,
     started: Instant,
+    /// [`net::network_epoch`] when the link started.
+    epoch: u64,
 }
 
 impl Link {
@@ -452,6 +481,7 @@ impl Link {
         tun: Arc<AsyncDevice>,
         has_v6: bool,
     ) -> Result<Self> {
+        let epoch = net::network_epoch();
         let sock = UdpSocket::from_std(net::link_socket(server, phys)?)?;
         let tunn = Tunn::new(
             x25519::StaticSecret::from(cfg.private_key),
@@ -481,7 +511,7 @@ impl Link {
             tasks.push(tokio::spawn(net_to_tun(tun, tunn, wire, server_ip)));
         }
         tasks.push(tokio::spawn(timers(tunn.clone(), wire)));
-        Ok(Self { tunn, tasks, fail_rx, started: Instant::now() })
+        Ok(Self { tunn, tasks, fail_rx, started: Instant::now(), epoch })
     }
 
     fn stop(self) {

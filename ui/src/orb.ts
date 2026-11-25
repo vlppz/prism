@@ -170,6 +170,9 @@ export class Orb {
   private still = window.matchMedia("(prefers-reduced-motion: reduce)");
   private focused = document.hasFocus();
 
+  /** Render resolution cap: the orb is soft, so phones use less (main.ts). */
+  static maxDpr = 2;
+
   static create(canvas: HTMLCanvasElement, time?: number): Orb | null {
     const gl = canvas.getContext("webgl2", {
       premultipliedAlpha: true,
@@ -277,7 +280,7 @@ export class Orb {
   }
 
   private resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, Orb.maxDpr);
     const w = Math.round(this.canvas.clientWidth * dpr);
     const h = Math.round(this.canvas.clientHeight * dpr);
     if (!w || !h) return;

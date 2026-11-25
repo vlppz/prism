@@ -16,7 +16,6 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 prism-engine.workspace = true
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
-tauri-plugin-single-instance = "2"
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
@@ -26,6 +25,19 @@ rand = "0.9"
 # key display in the details sheet (the engine itself stays untouched)
 base64 = "0.22"
 x25519-dalek = { version = "2", features = ["static_secrets"] }
+# configs shared as a QR code picture (screenshot, photo)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+rqrr = "0.11"
+
+[dev-dependencies]
+qrcode = { version = "0.14", default-features = false, features = ["image"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# PrismNative: the VPN service and the tile call the session core
+jni = "0.21"
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = "2"

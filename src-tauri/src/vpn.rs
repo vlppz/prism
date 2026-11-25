@@ -1,5 +1,6 @@
 //! Runs the tunnel: through the root launchd daemon on macOS, in-process on
-//! Windows (the app itself runs elevated there).
+//! Windows (the app itself runs elevated there). Android runs it in its VPN
+//! service instead (android_core.rs).
 
 use std::time::Duration;
 
@@ -8,6 +9,7 @@ use prism_engine::Event;
 use tokio::sync::{mpsc, oneshot};
 
 /// Everything the UI needs to know about the running session.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub enum Update {
     Event(Event),
     /// Session ended; `Some` = it failed.

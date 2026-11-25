@@ -12,6 +12,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::config::Cidr;
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) fn run(cmd: &str, args: &[&str]) -> Result<String> {
     let mut c = Command::new(cmd);
     c.args(args);
@@ -83,10 +84,28 @@ pub fn physical_interface() -> Result<Phys> {
         let gateway = hop.trim().parse::<IpAddr>().ok().filter(|g| !g.is_unspecified());
         Ok(Phys { name: name.to_string(), index: idx.trim().parse().context("bad interface index")?, gateway })
     }
-    #[cfg(not(any(target_os = "macos", windows)))]
+    #[cfg(target_os = "android")]
+    {
+        // The app is excluded from its own VPN, so its sockets simply follow
+        // the default network; switches arrive through [`network_changed`].
+        Ok(Phys { name: "the default network".into(), index: 0, gateway: None })
+    }
+    #[cfg(not(any(target_os = "macos", windows, target_os = "android")))]
     {
         bail!("unsupported platform")
     }
+}
+
+static NETWORK_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Called when the OS reports a different default network (Android): the
+/// running link's socket is tied to the old one, so the tunnel relinks.
+pub fn network_changed() {
+    NETWORK_EPOCH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn network_epoch() -> u64 {
+    NETWORK_EPOCH.load(std::sync::atomic::Ordering::SeqCst)
 }
 
 /// Fails if another full-tunnel VPN already owns the internet route: its
@@ -307,7 +326,13 @@ impl Routes {
             )
             .map(drop)
         }
-        #[cfg(not(any(target_os = "macos", windows)))]
+        // Android: VpnService.Builder already installed every route.
+        #[cfg(target_os = "android")]
+        {
+            let _ = cidr;
+            Ok(())
+        }
+        #[cfg(not(any(target_os = "macos", windows, target_os = "android")))]
         {
             let _ = cidr;
             bail!("unsupported platform")
