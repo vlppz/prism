@@ -145,9 +145,16 @@ jobs:
           > **macOS:** if it says the app is damaged or can't be opened, run `xattr -cr /Applications/Prism.app`, or allow it in System Settings → Privacy & Security → *Open Anyway*.
           > **Windows:** in the SmartScreen prompt, click *More info* → *Run anyway*.
           NOTES
-          if ! out=$(gh release create "$GITHUB_REF_NAME" dist/* --title "Prism $GITHUB_REF_NAME" --notes-file notes.md --generate-notes 2>&1); then
-            echo "$out"
-            echo "::error title=gh release create failed::$(echo "$out" | tr '\n' ' ')"
-            exit 1
-          fi
-          echo "$out"
+          # GitHub occasionally answers 5xx here: retry, and never leave a
+          # half-made release behind between attempts.
+          for attempt in 1 2 3 4; do
+            if out=$(gh release create "$GITHUB_REF_NAME" dist/* --title "Prism $GITHUB_REF_NAME" --notes-file notes.md 2>&1); then
+              echo "$out"
+              exit 0
+            fi
+            echo "attempt $attempt: $out"
+            gh release delete "$GITHUB_REF_NAME" --yes 2>/dev/null || true
+            sleep $((attempt * 15))
+          done
+          echo "::error title=gh release create failed::$(echo "$out" | tr '\n' ' ')"
+          exit 1
