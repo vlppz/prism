@@ -710,12 +710,6 @@ h1 {
 [data-state="connected"] .badge.has-flag::after,
 .light [data-state="connected"] .badge.has-flag::after {
   box-shadow: 0 0 14px var(--flag-glow), 0 0 4px var(--flag-glow);
-  animation: flag-glow 3s ease-in-out infinite;
-}
-@keyframes flag-glow {
-  50% {
-    opacity: 0.45;
-  }
 }
 /* connecting / trouble: the usual spinner and amber ring still show through */
 [data-state="connecting"] .badge.has-flag .badge-ring::after,
