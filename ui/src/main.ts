@@ -34,7 +34,31 @@ function fitPhone() {
   body.style.height = `${h / k}px`;
   body.style.zoom = String(k);
 }
+// Touch screens keep :hover on whatever was tapped last (a button stays lit
+// after its panel closed): phones get the stylesheet without hover states.
+function dropHover(group: CSSStyleSheet | CSSGroupingRule) {
+  const rules = group.cssRules;
+  for (let i = rules.length - 1; i >= 0; i--) {
+    const r = rules[i];
+    if (r instanceof CSSStyleRule) {
+      if (!r.selectorText.includes(":hover")) continue;
+      const keep = r.selectorText.split(",").filter((sel) => !sel.includes(":hover"));
+      if (keep.length) r.selectorText = keep.join(",");
+      else group.deleteRule(i);
+    } else if (r instanceof CSSGroupingRule) {
+      dropHover(r);
+    }
+  }
+}
+
 if (android) {
+  for (const sheet of document.styleSheets) {
+    try {
+      dropHover(sheet);
+    } catch {
+      // a sheet we can't read has no hover rules of ours
+    }
+  }
   fitPhone();
   let fitTimer = 0;
   // rotation, the keyboard opening
@@ -196,6 +220,9 @@ setInterval(() => {
   if (status.state === "connected" && status.since && !document.hidden) $("sub").textContent = elapsed(status.since);
 }, 1000);
 
+// Android has no file type for .conf (they arrive as generic binary), so a
+// filter would grey them out: allow any file, the import tells what it was
+if (android) $<HTMLInputElement>("file").removeAttribute("accept");
 const pickFile = () => $<HTMLInputElement>("file").click();
 
 async function toggle() {
@@ -845,16 +872,6 @@ smartBtn.addEventListener("click", async () => {
   renderSettings();
 });
 $("quit").addEventListener("click", () => api.quit());
-$("addTile").addEventListener("click", async () => {
-  try {
-    const r = await api.addTile();
-    if (r === "added") toast("Prism is in Quick Settings.", "info");
-    else if (r === "already") toast("Prism is already in Quick Settings.", "info");
-    else if (r === "manual") toast("Swipe down twice, tap ✎ and drag Prism into your tiles.", "info");
-  } catch (e) {
-    toast(errText(e));
-  }
-});
 $("gh").addEventListener("click", () => api.openGithub());
 void api.version().then((v) => ($("ver").textContent = v));
 

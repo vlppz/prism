@@ -199,15 +199,6 @@ async fn take_connect() -> bool {
     false
 }
 
-/// Android: offers to add Prism's tile to Quick Settings.
-#[tauri::command]
-async fn add_tile() -> CmdResult<String> {
-    #[cfg(target_os = "android")]
-    return android::add_tile().await.map_err(err);
-    #[cfg(not(target_os = "android"))]
-    Err("not supported here".into())
-}
-
 /// Android: the clipboard's text (pages can't read it without a prompt).
 #[tauri::command]
 async fn paste_text() -> CmdResult<String> {
@@ -624,7 +615,6 @@ pub fn run() {
             decode_qr,
             scan_qr,
             take_connect,
-            add_tile,
             rename
         ])
         .build(tauri::generate_context!())

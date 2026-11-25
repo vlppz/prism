@@ -108,12 +108,3 @@ pub async fn take_connect() -> Result<bool> {
     Ok(call::<Connect>("takeConnect", (), 10).await?.connect)
 }
 
-#[derive(Deserialize)]
-struct AddTile {
-    result: String,
-}
-
-/// added | already | declined | manual (Android 12 and older: no prompt).
-pub async fn add_tile() -> Result<String> {
-    Ok(call::<AddTile>("addTile", (), 120).await?.result)
-}

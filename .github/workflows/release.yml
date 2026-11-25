@@ -1,7 +1,7 @@
 name: Release
 
 # Push a `v*` tag (matching the version in src-tauri/tauri.conf.json) to build
-# macOS + Windows and publish a GitHub release. Running it manually
+# macOS + Windows + Android and publish a GitHub release. Running it manually
 # (Actions → Release → Run workflow) only builds and uploads the installers
 # as workflow artifacts.
 on:
@@ -108,8 +108,79 @@ jobs:
           path: out/*
           if-no-files-found: error
 
+  android:
+    name: build (android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          [ "v$version" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != app version v$version" >&2; exit 1; }
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        run: pnpm --dir ui install --frozen-lockfile
+
+      # The release key lives in repository secrets; Android only installs an
+      # update signed with the same key as the installed app.
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.PRISM_KEYSTORE_B64 }}
+        run: |
+          [ -n "$KEYSTORE_B64" ] || { echo "::error title=No signing key::set the PRISM_KEYSTORE_* repository secrets" >&2; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/prism-release.jks"
+          echo "PRISM_KEYSTORE=$RUNNER_TEMP/prism-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build
+        env:
+          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
+          PRISM_KEYSTORE_PASSWORD: ${{ secrets.PRISM_KEYSTORE_PASSWORD }}
+          PRISM_KEY_ALIAS: ${{ secrets.PRISM_KEY_ALIAS }}
+          PRISM_KEY_PASSWORD: ${{ secrets.PRISM_KEY_PASSWORD }}
+        run: pnpm --dir ui tauri android build --apk --ci --target aarch64 armv7 x86_64
+
+      - name: Collect the APK
+        run: |
+          version=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          mkdir -p out
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk "out/Prism_${version}_android.apk"
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          "$apksigner" verify --print-certs out/*.apk
+          ls -la out
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: prism-android
+          path: out/*
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, android]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -136,14 +207,17 @@ jobs:
           | macOS · Apple Silicon (M1–M4) | `Prism_*_aarch64.dmg` |
           | macOS · Intel | `Prism_*_x64.dmg` |
           | Windows · x64 | `Prism_*_x64-setup.exe` |
+          | Android 7.0+ | `Prism_*_android.apk` |
 
           > **Приложение пока не подписано сертификатом разработчика.**
           > **macOS:** если система пишет, что приложение повреждено или его нельзя открыть, выполните `xattr -cr /Applications/Prism.app` или разрешите запуск в «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть».
           > **Windows:** в окне SmartScreen нажмите «Подробнее» → «Выполнить в любом случае».
+          > **Android:** откройте APK и разрешите установку из этого источника.
           >
           > **Not code-signed yet.**
           > **macOS:** if it says the app is damaged or can't be opened, run `xattr -cr /Applications/Prism.app`, or allow it in System Settings → Privacy & Security → *Open Anyway*.
           > **Windows:** in the SmartScreen prompt, click *More info* → *Run anyway*.
+          > **Android:** open the APK and allow installs from that source.
           NOTES
           # GitHub occasionally answers 5xx here: retry, and never leave a
           # half-made release behind between attempts.

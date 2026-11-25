@@ -61,8 +61,6 @@ export interface Api {
   scanQr(): Promise<string | null>;
   /** Android: the Quick Settings tile opened Prism to connect. */
   takeConnect(): Promise<boolean>;
-  /** Android: offers the Quick Settings tile. */
-  addTile(): Promise<"added" | "already" | "declined" | "manual">;
   setTheme(theme: Theme): Promise<Index>;
   setSmart(on: boolean): Promise<Index>;
   details(id: string): Promise<Details>;
@@ -99,7 +97,6 @@ async function tauriApi(): Promise<Api> {
     decodeQr: (image) => invoke("decode_qr", image),
     scanQr: () => invoke("scan_qr"),
     takeConnect: () => invoke("take_connect"),
-    addTile: () => invoke("add_tile"),
     setTheme: (theme) => invoke("set_theme", { theme }),
     setSmart: (on) => invoke("set_smart", { on }),
     details: (id) => invoke("details", { id }),
@@ -179,7 +176,6 @@ function mockApi(): Api {
     },
     scanQr: async () => null,
     takeConnect: async () => false,
-    addTile: async () => "manual",
     setTheme: async (theme) => (index = { ...index, theme }),
     setSmart: async (smart) => (index = { ...index, smart }),
     serverIp: async () => "192.0.2.1",

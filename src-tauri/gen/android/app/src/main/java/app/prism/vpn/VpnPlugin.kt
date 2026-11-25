@@ -6,9 +6,6 @@ import android.content.pm.PackageManager
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.OnBackPressedCallback
-import android.app.StatusBarManager
-import android.content.ComponentName
-import android.graphics.drawable.Icon
 import android.os.Build
 import android.content.ClipboardManager
 import android.content.Intent
@@ -158,30 +155,6 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
         val on = connectRequested
         connectRequested = false
         invoke.resolve(JSObject().put("connect", on))
-    }
-
-    /** Offers to put the tile in Quick Settings (Android 13+ asks in one tap). */
-    @Command
-    fun addTile(invoke: Invoke) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-            invoke.resolve(JSObject().put("result", "manual"))
-            return
-        }
-        val sbm = activity.getSystemService(StatusBarManager::class.java)
-        sbm.requestAddTileService(
-            ComponentName(activity, PrismTileService::class.java),
-            "Prism",
-            Icon.createWithResource(activity, R.drawable.ic_tile),
-            activity.mainExecutor
-        ) { code ->
-            val result = when (code) {
-                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED -> "added"
-                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED -> "already"
-                StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED -> "declined"
-                else -> "manual"
-            }
-            invoke.resolve(JSObject().put("result", result))
-        }
     }
 
     @Command
