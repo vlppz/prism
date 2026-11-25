@@ -386,7 +386,7 @@ function renderMenu() {
         return `<div class="row${on ? " on" : ""}" role="option" tabindex="0" aria-selected="${on}" data-id="${esc(it.id)}" style="--fade:${fade.toFixed(2)}">
           ${on ? STARS + CHECK : `<span class="check"></span>`}
           <span class="row-text"><span class="row-name">${esc(it.name)}</span><span class="row-host">${esc(it.host)}</span></span>
-          ${android ? `<button class="rm ren" type="button" data-ren="${esc(it.id)}" aria-label="Rename ${esc(it.name)}">${PEN}</button>` : ""}
+          <button class="rm ren" type="button" data-ren="${esc(it.id)}" aria-label="Rename ${esc(it.name)}">${PEN}</button>
           <button class="rm" type="button" data-rm="${esc(it.id)}" aria-label="Remove ${esc(it.name)}">${CROSS}</button>
         </div>`;
       })
@@ -875,7 +875,7 @@ $("quit").addEventListener("click", () => api.quit());
 $("gh").addEventListener("click", () => api.openGithub());
 void api.version().then((v) => ($("ver").textContent = v));
 
-// ---------- rename (phones) ----------
+// ---------- rename ----------
 
 const renameBox = $("rename");
 const renameInput = $<HTMLInputElement>("renameInput");
@@ -995,6 +995,7 @@ if (dev?.has("instant")) {
 setTimeout(() => {
   if (dev?.has("menu")) openMenu(true);
   if (dev?.has("settings")) openSettings(true);
+  if (dev?.has("rename")) openRename(index.selected);
   if (dev?.has("sheet")) {
     if (status.state === "connected") onStats({ rx: 734_220_000, tx: 41_800_000, handshakeAge: 37, level: 0 });
     void openSheet(true);
