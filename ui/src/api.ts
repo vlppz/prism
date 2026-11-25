@@ -136,6 +136,9 @@ function mockApi(): Api {
       })),
     );
   if (demo.get("empty")) index = { ...index, items: [], selected: null };
+  // `few=2`: only the first n servers; `sel=b`: which one is selected
+  if (demo.get("few")) index.items = index.items.slice(0, Number(demo.get("few")));
+  if (demo.get("sel")) index.selected = demo.get("sel");
   if (demo.has("cc")) index.items[0].country = demo.get("cc") || null;
   const state = (demo.get("demo") as State) ?? "off";
   let status: Status = { state, configId: state === "off" ? null : index.selected, error: demo.get("error"), since: Date.now() - 754_000 };

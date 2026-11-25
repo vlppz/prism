@@ -158,11 +158,14 @@ jobs:
 
       - name: Build
         env:
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
           PRISM_KEYSTORE_PASSWORD: ${{ secrets.PRISM_KEYSTORE_PASSWORD }}
-          PRISM_KEY_ALIAS: ${{ secrets.PRISM_KEY_ALIAS }}
           PRISM_KEY_PASSWORD: ${{ secrets.PRISM_KEY_PASSWORD }}
-        run: pnpm --dir ui tauri android build --apk --ci --target aarch64 armv7 x86_64
+          # not a secret (as one, every "prism" in the logs would be masked)
+          PRISM_KEY_ALIAS: prism
+        run: |
+          # the runner's preinstalled NDK (a machine variable, not in `env.`)
+          export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          pnpm --dir ui tauri android build --apk --ci --target aarch64 armv7 x86_64
 
       - name: Collect the APK
         run: |

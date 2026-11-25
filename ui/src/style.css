@@ -1937,6 +1937,25 @@ button.kv:focus-visible {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
+/* without the blur the panels must be opaque, or the bright orb shows
+   through them as a light band */
+.os-android .menu,
+.os-android .settings,
+.os-android .sheet {
+  background: linear-gradient(180deg, rgb(27, 27, 33), rgb(10, 10, 13));
+}
+.light .os-android .menu,
+.light .os-android .settings,
+.light .os-android .sheet {
+  background: linear-gradient(180deg, rgb(255, 255, 255), rgb(247, 247, 250));
+}
+/* the server list scrolls, which clips: give the selected row's glow and
+   shadow room inside it */
+.os-android .rows {
+  margin: -20px -7px -36px;
+  padding: 20px 7px 36px;
+  max-height: 306px;
+}
 /* launch: main.ts lifts a cover instead of fading the page in */
 .os-android {
   transition: none;

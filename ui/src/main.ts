@@ -985,12 +985,21 @@ if (android) {
   requestAnimationFrame(() => document.body.classList.add("ready"));
 }
 
-if (dev?.has("menu")) openMenu(true);
-if (dev?.has("settings")) openSettings(true);
-if (dev?.has("sheet")) {
-  if (status.state === "connected") onStats({ rx: 734_220_000, tx: 41_800_000, handshakeAge: 37, level: 0 });
-  void openSheet(true);
+// `instant`: no transitions, so headless screenshots show final states
+if (dev?.has("instant")) {
+  const st = document.createElement("style");
+  st.textContent = "*,*::before,*::after{transition:none!important}";
+  document.head.append(st);
 }
+// (on phones, after the launch warm-up has closed its panels again)
+setTimeout(() => {
+  if (dev?.has("menu")) openMenu(true);
+  if (dev?.has("settings")) openSettings(true);
+  if (dev?.has("sheet")) {
+    if (status.state === "connected") onStats({ rx: 734_220_000, tx: 41_800_000, handshakeAge: 37, level: 0 });
+    void openSheet(true);
+  }
+}, android ? 1200 : 0);
 if (dev?.has("toast")) toast(dev.get("toast") || "server.conf: The [Peer] section has no Endpoint.");
 if (dev?.has("drag")) document.body.classList.add("dragging");
 // `sim=connecting:1.2,ripple,connected:0.4` plays orb states forward and freezes on that frame
