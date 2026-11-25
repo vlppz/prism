@@ -5,7 +5,7 @@
 <h1 align="center">Prism</h1>
 
 <p align="center">
-  WireGuard that gets through.<br>
+  Full bypass of TSPU checks for WireGuard.<br>
   <a href="README.md">Русский</a> · <b>English</b>
 </p>
 

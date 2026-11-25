@@ -5,7 +5,7 @@
 <h1 align="center">Prism</h1>
 
 <p align="center">
-  WireGuard, который проходит.<br>
+  Полный обход проверок ТСПУ для WireGuard.<br>
   <b>Русский</b> · <a href="README.en.md">English</a>
 </p>
 
