@@ -197,11 +197,93 @@ power.addEventListener("blur", () => {
 const menu = $("menu");
 const picker = $<HTMLButtonElement>("picker");
 
+// ---------- country flag: looked up once per server from its IP ----------
+
+// square flags, bundled; only the one shown is ever loaded
+const FLAGS = import.meta.glob<string>("../node_modules/flag-icons/flags/1x1/*.svg", { query: "?url", import: "default" });
+const flagLoader = (cc: string) => FLAGS[`../node_modules/flag-icons/flags/1x1/${cc}.svg`];
+const flagLooks = new Map<string, Promise<{ url: string; ring: string; glow: string } | null>>();
+const asked = new Set<string>();
+
+/** The flag's own colours, by area, as a soft ring around it. */
+function flagLook(cc: string) {
+  let p = flagLooks.get(cc);
+  if (p) return p;
+  p = (async () => {
+    const load = flagLoader(cc);
+    if (!load) return null;
+    const url = await load();
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = c.height = 24;
+    const g = c.getContext("2d", { willReadFrequently: true })!;
+    g.drawImage(img, 0, 0, 24, 24);
+    const px = g.getImageData(0, 0, 24, 24).data;
+    const counts = new Map<string, { n: number; rgb: number[] }>();
+    for (let i = 0; i < px.length; i += 4) {
+      const rgb = [px[i], px[i + 1], px[i + 2]];
+      const key = rgb.map((v) => v >> 5).join();
+      const e = counts.get(key) ?? { n: 0, rgb };
+      e.n++;
+      counts.set(key, e);
+    }
+    const top = [...counts.values()].sort((a, b) => b.n - a.n).filter((e) => e.n >= 24 * 24 * 0.06).slice(0, 4);
+    const hex = top.map((e) => `rgb(${e.rgb.join(" ")})`);
+    if (!hex.length) return null;
+    // the most colourful one lights the glow; white rarely is
+    const vivid = [...top].sort((a, b) => sat(b.rgb) - sat(a.rgb))[0].rgb;
+    const ring = hex.length === 1 ? hex[0] : `conic-gradient(from 210deg, ${[...hex, hex[0]].join(", ")})`;
+    return { url, ring, glow: `rgb(${vivid.join(" ")} / 0.55)` };
+  })().catch(() => null);
+  flagLooks.set(cc, p);
+  return p;
+}
+function sat([r, g, b]: number[]) {
+  return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
+/** Find out where a server is (once), then remember it with the config. */
+async function locate(it: Item) {
+  if (it.country || asked.has(it.id)) return;
+  asked.add(it.id);
+  try {
+    const ip = await api.serverIp(it.id);
+    const r = await fetch(`https://api.country.is/${encodeURIComponent(ip)}`, { signal: AbortSignal.timeout(8000) });
+    const cc = String((await r.json()).country ?? "").toLowerCase();
+    if (/^[a-z]{2}$/.test(cc) && flagLoader(cc)) {
+      index = await api.setCountry(it.id, cc);
+      renderPicker();
+    }
+  } catch {
+    // offline or the lookup failed: the monogram stays, we'll try next launch
+  }
+}
+
+let shownFlag = "";
+async function renderFlag(it: Item | null) {
+  const badge = $("badge");
+  const cc = it?.country ?? "";
+  if (cc === shownFlag) return;
+  shownFlag = cc;
+  const look = cc ? await flagLook(cc) : null;
+  if (shownFlag !== cc) return; // a newer render won
+  badge.classList.toggle("has-flag", !!look);
+  if (look) {
+    $("flag").style.backgroundImage = `url("${look.url}")`;
+    badge.style.setProperty("--flag-ring", look.ring);
+    badge.style.setProperty("--flag-glow", look.glow);
+  }
+}
+
 function renderPicker() {
   const it = active();
   $("pickName").textContent = it?.name ?? "Import a config";
   $("pickHost").textContent = it?.host ?? "Choose a .conf file";
   $("mono").textContent = mono(it);
+  void renderFlag(it);
+  if (it) void locate(it);
   picker.setAttribute("aria-label", it ? `Server: ${it.name}` : "Import a WireGuard config");
 }
 

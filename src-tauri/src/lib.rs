@@ -137,6 +137,16 @@ fn details(state: State<'_, AppState>, id: String) -> CmdResult<store::Details> 
 }
 
 #[tauri::command]
+async fn server_ip(state: State<'_, AppState>, id: String) -> CmdResult<String> {
+    state.store.server_ip(&id).await.map(|ip| ip.to_string()).map_err(err)
+}
+
+#[tauri::command]
+fn set_country(state: State<'_, AppState>, id: String, country: String) -> CmdResult<Index> {
+    state.store.set_country(&id, &country).map_err(err)
+}
+
+#[tauri::command]
 fn status(state: State<'_, AppState>) -> Status {
     state.status.lock().clone()
 }
@@ -444,7 +454,9 @@ pub fn run() {
             quit_app,
             details,
             open_github,
-            set_smart
+            set_smart,
+            server_ip,
+            set_country
         ])
         .build(tauri::generate_context!())
         .expect("error while building Prism");

@@ -121,24 +121,33 @@ jobs:
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          name: Prism ${{ github.ref_name }}
-          files: dist/*
-          generate_release_notes: true
-          body: |
-            ## Скачать · Download
+      # gh is preinstalled on the runner; on failure its message is surfaced
+      # as an annotation so it's readable without downloading logs.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Скачать · Download
 
-            | Платформа · Platform | Файл · File |
-            |---|---|
-            | macOS · Apple Silicon (M1–M4) | `Prism_*_aarch64.dmg` |
-            | macOS · Intel | `Prism_*_x64.dmg` |
-            | Windows · x64 | `Prism_*_x64-setup.exe` |
+          | Платформа · Platform | Файл · File |
+          |---|---|
+          | macOS · Apple Silicon (M1–M4) | `Prism_*_aarch64.dmg` |
+          | macOS · Intel | `Prism_*_x64.dmg` |
+          | Windows · x64 | `Prism_*_x64-setup.exe` |
 
-            > **Приложение пока не подписано сертификатом разработчика.**
-            > **macOS:** если система пишет, что приложение повреждено или его нельзя открыть, выполните `xattr -cr /Applications/Prism.app` или разрешите запуск в «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть».
-            > **Windows:** в окне SmartScreen нажмите «Подробнее» → «Выполнить в любом случае».
-            >
-            > **Not code-signed yet.**
-            > **macOS:** if it says the app is damaged or can't be opened, run `xattr -cr /Applications/Prism.app`, or allow it in System Settings → Privacy & Security → *Open Anyway*.
-            > **Windows:** in the SmartScreen prompt, click *More info* → *Run anyway*.
+          > **Приложение пока не подписано сертификатом разработчика.**
+          > **macOS:** если система пишет, что приложение повреждено или его нельзя открыть, выполните `xattr -cr /Applications/Prism.app` или разрешите запуск в «Системные настройки → Конфиденциальность и безопасность → Всё равно открыть».
+          > **Windows:** в окне SmartScreen нажмите «Подробнее» → «Выполнить в любом случае».
+          >
+          > **Not code-signed yet.**
+          > **macOS:** if it says the app is damaged or can't be opened, run `xattr -cr /Applications/Prism.app`, or allow it in System Settings → Privacy & Security → *Open Anyway*.
+          > **Windows:** in the SmartScreen prompt, click *More info* → *Run anyway*.
+          NOTES
+          if ! out=$(gh release create "$GITHUB_REF_NAME" dist/* --title "Prism $GITHUB_REF_NAME" --notes-file notes.md --generate-notes 2>&1); then
+            echo "$out"
+            echo "::error title=gh release create failed::$(echo "$out" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "$out"

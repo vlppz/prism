@@ -91,6 +91,7 @@ pub fn physical_interface() -> Result<Phys> {
 
 /// Fails if another full-tunnel VPN already owns the internet route: its
 /// routes would fight ours.
+/// (Only macOS can tell; on Windows the newest default route simply wins.)
 pub fn check_no_other_vpn() -> Result<()> {
     #[cfg(target_os = "macos")]
     {

@@ -16,6 +16,9 @@ pub struct Item {
     /// Has its own AmneziaWG junk settings (otherwise Prism's profile is used).
     #[serde(default)]
     pub custom: bool,
+    /// ISO country code of the server ("fi"), looked up once from its IP.
+    #[serde(default)]
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,7 +118,7 @@ impl Store {
             None => format!("{:016x}", rand::random::<u64>()),
         };
         write_private(&self.conf_path(&id)?, text.as_bytes())?;
-        let item = Item { id: id.clone(), name, host: cfg.endpoint_host().to_string(), custom };
+        let item = Item { id: id.clone(), name, host: cfg.endpoint_host().to_string(), custom, country: None };
         match index.items.iter_mut().find(|i| i.id == id) {
             Some(slot) => *slot = item.clone(),
             None => index.items.push(item.clone()),
@@ -173,6 +176,26 @@ impl Store {
             allowed_ips: join(cfg.peer.allowed_ips.iter().map(ToString::to_string).collect()),
             keepalive: cfg.peer.keepalive,
         })
+    }
+
+    pub fn set_country(&self, id: &str, country: &str) -> Result<Index> {
+        let cc = country.to_ascii_lowercase();
+        if cc.len() != 2 || !cc.bytes().all(|b| b.is_ascii_lowercase()) {
+            bail!("bad country code");
+        }
+        let mut index = self.index();
+        let item = index.items.iter_mut().find(|i| i.id == id).context("this server no longer exists")?;
+        item.country = Some(cc);
+        self.save(&index)?;
+        Ok(index)
+    }
+
+    /// The server's address as the tunnel would dial it (IPv4 first).
+    pub async fn server_ip(&self, id: &str) -> Result<std::net::IpAddr> {
+        let cfg = prism_engine::parse(&self.read(id)?)?;
+        let mut addrs: Vec<_> = tokio::net::lookup_host(cfg.peer.endpoint.as_str()).await?.map(|a| a.ip()).collect();
+        addrs.sort_by_key(|a| !a.is_ipv4());
+        addrs.into_iter().next().context("the server has no IP address")
     }
 
     pub fn set_smart(&self, on: bool) -> Result<Index> {

@@ -8,6 +8,8 @@ export interface Item {
   name: string;
   host: string;
   custom: boolean;
+  /** ISO country code of the server, once known. */
+  country?: string | null;
 }
 export type Theme = "system" | "light" | "dark";
 export interface Index {
@@ -52,6 +54,8 @@ export interface Api {
   setTheme(theme: Theme): Promise<Index>;
   setSmart(on: boolean): Promise<Index>;
   details(id: string): Promise<Details>;
+  serverIp(id: string): Promise<string>;
+  setCountry(id: string, country: string): Promise<Index>;
   version(): Promise<string>;
   quit(): void;
   openGithub(): void;
@@ -80,6 +84,8 @@ async function tauriApi(): Promise<Api> {
     setTheme: (theme) => invoke("set_theme", { theme }),
     setSmart: (on) => invoke("set_smart", { on }),
     details: (id) => invoke("details", { id }),
+    serverIp: (id) => invoke("server_ip", { id }),
+    setCountry: (id, country) => invoke("set_country", { id, country }),
     version: () => getVersion(),
     quit: () => void invoke("quit_app"),
     openGithub: () => void invoke("open_github"),
@@ -94,10 +100,10 @@ function mockApi(): Api {
   const demo = new URLSearchParams(location.hash.slice(1));
   let index: Index = {
     items: [
-      { id: "a", name: "frankfurt", host: "fra.vpn.example.com", custom: false },
-      { id: "b", name: "helsinki", host: "hel.vpn.example.com", custom: false },
-      { id: "c", name: "stockholm", host: "sto.vpn.example.com", custom: false },
-      { id: "d", name: "warsaw", host: "waw.vpn.example.com", custom: false },
+      { id: "a", name: "frankfurt", host: "fra.vpn.example.com", custom: false, country: "de" },
+      { id: "b", name: "helsinki", host: "hel.vpn.example.com", custom: false, country: "fi" },
+      { id: "c", name: "stockholm", host: "sto.vpn.example.com", custom: false, country: "se" },
+      { id: "d", name: "warsaw", host: "waw.vpn.example.com", custom: false, country: "pl" },
     ],
     selected: "a",
     theme: (demo.get("theme") as Theme) ?? "system",
@@ -113,6 +119,7 @@ function mockApi(): Api {
       })),
     );
   if (demo.get("empty")) index = { ...index, items: [], selected: null };
+  if (demo.has("cc")) index.items[0].country = demo.get("cc") || null;
   const state = (demo.get("demo") as State) ?? "off";
   let status: Status = { state, configId: state === "off" ? null : index.selected, error: demo.get("error"), since: Date.now() - 754_000 };
   let statusCb: (s: Status) => void = () => {};
@@ -147,6 +154,9 @@ function mockApi(): Api {
     platform: async () => (demo.get("win") ? "windows" : "macos"),
     setTheme: async (theme) => (index = { ...index, theme }),
     setSmart: async (smart) => (index = { ...index, smart }),
+    serverIp: async () => "192.0.2.1",
+    setCountry: async (id, country) =>
+      (index = { ...index, items: index.items.map((i) => (i.id === id ? { ...i, country } : i)) }),
     details: async (id) => ({
       publicKey: "kQ3v8yJ0m2cRZb7xPq1Lw9sTn4uVfE6hGdA5oKiMcXY=",
       addresses: "10.14.0.2/16",
