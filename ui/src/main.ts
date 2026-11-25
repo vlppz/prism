@@ -236,7 +236,7 @@ function flagLook(cc: string) {
     const vivid = [...top].sort((a, b) => sat(b.rgb) - sat(a.rgb))[0].rgb;
     // a closed loop of the flag's colours; CSS spins it
     const ring = [...hex, hex[0]].join(", ");
-    return { url, ring, glow: `rgb(${vivid.join(" ")} / 0.55)` };
+    return { url, ring, glow: `rgb(${vivid.join(" ")} / 0.4)` };
   })().catch(() => null);
   flagLooks.set(cc, p);
   return p;

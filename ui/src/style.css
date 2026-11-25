@@ -707,9 +707,12 @@ h1 {
 [data-state="connected"] .badge.has-flag .badge-ring {
   opacity: 1;
 }
-[data-state="connected"] .badge.has-flag::after,
+/* a tight halo in the flag's colour, not a cloud */
+[data-state="connected"] .badge.has-flag::after {
+  box-shadow: 0 0 7px var(--flag-glow);
+}
 .light [data-state="connected"] .badge.has-flag::after {
-  box-shadow: 0 0 14px var(--flag-glow), 0 0 4px var(--flag-glow);
+  box-shadow: 0 0 5px var(--flag-glow);
 }
 /* connecting / trouble: the usual spinner and amber ring still show through */
 [data-state="connecting"] .badge.has-flag .badge-ring::after,
