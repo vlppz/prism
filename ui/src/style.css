@@ -683,11 +683,23 @@ h1 {
 .badge.has-flag .badge-mono {
   opacity: 0;
 }
+/* the flag's colours chase each other round the badge */
+@property --flag-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
 .badge.has-flag .badge-ring {
   padding: 2px;
-  background: var(--flag-ring);
+  background: conic-gradient(from var(--flag-angle), var(--flag-colors));
   opacity: 0.75;
+  animation: flag-spin 6s linear infinite;
   transition: opacity 0.9s var(--ease);
+}
+@keyframes flag-spin {
+  to {
+    --flag-angle: 360deg;
+  }
 }
 .badge.has-flag .badge-ring::after {
   display: none;
@@ -698,6 +710,12 @@ h1 {
 [data-state="connected"] .badge.has-flag::after,
 .light [data-state="connected"] .badge.has-flag::after {
   box-shadow: 0 0 14px var(--flag-glow), 0 0 4px var(--flag-glow);
+  animation: flag-glow 3s ease-in-out infinite;
+}
+@keyframes flag-glow {
+  50% {
+    opacity: 0.45;
+  }
 }
 /* connecting / trouble: the usual spinner and amber ring still show through */
 [data-state="connecting"] .badge.has-flag .badge-ring::after,

@@ -234,7 +234,8 @@ function flagLook(cc: string) {
     if (!hex.length) return null;
     // the most colourful one lights the glow; white rarely is
     const vivid = [...top].sort((a, b) => sat(b.rgb) - sat(a.rgb))[0].rgb;
-    const ring = hex.length === 1 ? hex[0] : `conic-gradient(from 210deg, ${[...hex, hex[0]].join(", ")})`;
+    // a closed loop of the flag's colours; CSS spins it
+    const ring = [...hex, hex[0]].join(", ");
     return { url, ring, glow: `rgb(${vivid.join(" ")} / 0.55)` };
   })().catch(() => null);
   flagLooks.set(cc, p);
@@ -272,7 +273,7 @@ async function renderFlag(it: Item | null) {
   badge.classList.toggle("has-flag", !!look);
   if (look) {
     $("flag").style.backgroundImage = `url("${look.url}")`;
-    badge.style.setProperty("--flag-ring", look.ring);
+    badge.style.setProperty("--flag-colors", look.ring);
     badge.style.setProperty("--flag-glow", look.glow);
   }
 }
