@@ -1,0 +1,212 @@
+<!doctype html>
+<!-- App icon source: open with #mode=mac or #mode=win (add &dump to get the PNG as a data URL), render with headless Chrome (GPU), then `pnpm tauri icon`. -->
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:transparent}canvas{display:block}</style></head>
+<body><canvas id="c" width="1024" height="1024"></canvas>
+<script>
+// Ray-traced glass prism for the app icon. #mode=mac (squircle tile) | win (prism only, transparent)
+const q = new URLSearchParams(location.hash.slice(1));
+const MODE = q.get("mode") === "win" ? 1 : 0;
+const DUMP = q.has("dump");
+const P = (k, d) => (q.has(k) ? Number(q.get(k)) : d);
+
+const FS = `#version 300 es
+precision highp float;
+uniform vec2 uRes;
+uniform int uMode;
+uniform float uYaw, uPitch, uRoll, uDisp, uBack, uBar, uSpread, uLift;
+out vec4 o;
+
+mat3 rx(float a){float c=cos(a),s=sin(a);return mat3(1.,0.,0., 0.,c,s, 0.,-s,c);}
+mat3 ry(float a){float c=cos(a),s=sin(a);return mat3(c,0.,-s, 0.,1.,0., s,0.,c);}
+mat3 rz(float a){float c=cos(a),s=sin(a);return mat3(c,s,0., -s,c,0., 0.,0.,1.);}
+
+float sdTri(vec2 p, float r){
+  const float k = 1.7320508;
+  p.x = abs(p.x) - r; p.y = p.y + r / k;
+  if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+  p.x -= clamp(p.x, -2.0 * r, 0.0);
+  return -length(p) * sign(p.y);
+}
+
+mat3 R;
+const float HALF = 0.60, DEPTH = 0.30, BEV = 0.045;
+float map(vec3 p){
+  p = R * p;
+  float d2 = sdTri(p.xy, HALF - BEV * 1.7320508);
+  vec2 w = vec2(d2, abs(p.z) - (DEPTH - BEV));
+  return min(max(w.x, w.y), 0.0) + length(max(w, 0.0)) - BEV;
+}
+vec3 nrm(vec3 p){
+  const vec2 e = vec2(0.0006, -0.0006);
+  return normalize(e.xyy*map(p+e.xyy) + e.yyx*map(p+e.yyx) + e.yxy*map(p+e.yxy) + e.xxx*map(p+e.xxx));
+}
+
+// studio: a pale room, a big softbox above, coloured panels left/right/below
+// (the app's pink, blue and violet) and a few crisp bars that split into rainbows
+vec3 env(vec3 d){
+  // a dim violet studio: dark below, lighter above
+  vec3 c = mix(vec3(0.07, 0.05, 0.16), vec3(0.55, 0.50, 0.78), smoothstep(-0.5, 0.95, d.y));
+  // big softbox overhead
+  c += vec3(2.2, 2.1, 2.3) * smoothstep(0.55, 0.85, d.y) * smoothstep(0.85, 0.2, abs(d.x + 0.1));
+  // the app's colours as tall light panels
+  c += vec3(1.00, 0.22, 0.62) * 2.6 * exp(-pow((d.x + 0.58) / 0.20, 2.0)) * smoothstep(0.85, 0.0, abs(d.y + 0.05));
+  c += vec3(0.20, 0.42, 1.00) * 2.8 * exp(-pow((d.x - 0.56) / 0.20, 2.0)) * smoothstep(0.85, 0.0, abs(d.y + 0.05));
+  c += vec3(0.58, 0.30, 1.00) * 1.6 * smoothstep(-0.40, -0.90, d.y);
+  // crisp white bars: these split into rainbows through the glass
+  c += vec3(4.0) * exp(-pow((d.y - 0.30) / 0.025, 2.0)) * smoothstep(0.7, 0.1, abs(d.x));
+  c += vec3(3.0) * exp(-pow((d.x + d.y * 0.5 - 0.12) / 0.022, 2.0)) * smoothstep(0.9, 0.2, abs(d.y));
+  c += vec3(2.5) * exp(-pow((d.x - d.y * 0.6 + 0.25) / 0.02, 2.0)) * smoothstep(0.9, 0.2, abs(d.y + 0.2));
+  // behind the prism: a glowing spectral backlight, pink at the top-left to blue at the bottom-right
+  float back = smoothstep(0.55, 0.95, -d.z);
+  vec2 b = d.xy / max(-d.z, 0.2);
+  float g = clamp(0.5 + uSpread * (b.x - b.y), 0.0, 1.0);
+  vec3 spec3 = mix(mix(vec3(1.0, 0.36, 0.70), vec3(0.66, 0.42, 1.0), smoothstep(0.0, 0.55, g)), vec3(0.30, 0.55, 1.0), smoothstep(0.45, 1.0, g));
+  float glow = 0.55 + 0.9 * exp(-dot(b, b) * 6.0);
+  c = mix(c, spec3 * glow * uBack, back);
+  c += vec3(2.6) * exp(-pow((b.x + b.y * 0.3 + 0.02) / 0.012, 2.0)) * back * uBar;   // a beam crossing behind
+  return c;
+}
+
+vec3 spectral(float t){                       // t: 0 = red ... 1 = violet
+  return vec3(exp(-pow((t - 0.02) / 0.22, 2.0)) + 0.45 * exp(-pow((t - 1.0) / 0.16, 2.0)),
+              exp(-pow((t - 0.45) / 0.20, 2.0)),
+              exp(-pow((t - 0.80) / 0.20, 2.0)));
+}
+
+vec3 throughGlass(vec3 p, vec3 rd, vec3 n){
+  const int N = 7;
+  vec3 acc = vec3(0.0), wsum = vec3(0.0);
+  for (int i = 0; i < N; i++){
+    float t01 = (float(i) + 0.5) / float(N);
+    float ior = 1.50 + (t01 - 0.5) * uDisp;
+    vec3 w = spectral(t01);
+    vec3 d = refract(rd, n, 1.0 / ior);
+    vec3 q = p - n * 0.003;
+    float len = 0.0;
+    vec3 outDir = d;
+    for (int b = 0; b < 4; b++){
+      float t = 0.004;
+      for (int k = 0; k < 64; k++){
+        float h = -map(q + d * t);
+        if (h < 0.0004) break;
+        t += max(h, 0.002);
+      }
+      q += d * t; len += t;
+      vec3 ne = nrm(q);
+      vec3 r = refract(d, -ne, ior);
+      if (dot(r, r) > 0.0) { outDir = r; break; }
+      d = reflect(d, -ne);
+      q -= ne * 0.003;
+      outDir = d;
+    }
+    vec3 absorb = exp(-len * vec3(0.10, 0.16, 0.04));
+    acc += env(outDir) * absorb * w;
+    wsum += w;
+  }
+  return acc / wsum;
+}
+
+float squircle(vec2 p){ // superellipse n=5, 1 at the edge
+  p = abs(p);
+  return pow(pow(p.x, 5.0) + pow(p.y, 5.0), 0.2);
+}
+
+vec4 shade(vec2 frag){
+  vec2 uv = (frag - 0.5 * uRes) / (0.5 * uRes.y);     // -1..1
+  float scale = uMode == 0 ? 1.0 : 0.80;
+  vec3 ro = vec3(0.0, 0.0, 6.0);
+  vec3 rd = normalize(vec3(uv * 0.205 * scale, -1.0));
+  ro.y += uMode == 0 ? uLift : 0.17;                    // the triangle's box sits above its centroid
+
+  float t = 0.0; bool hit = false;
+  for (int i = 0; i < 120; i++){
+    float h = map(ro + rd * t);
+    if (h < 0.0003) { hit = true; break; }
+    t += h;
+    if (t > 9.0) break;
+  }
+
+  // ---- tile
+  vec4 bg = vec4(0.0);
+  vec2 sp = uv / 0.8047;                                // 824/1024 tile
+  if (uMode == 0){
+    float s = squircle(sp);
+    float px = 2.0 / uRes.y / 0.8047;
+    float inside = 1.0 - smoothstep(1.0 - px, 1.0 + px, s);
+    vec3 tile = mix(vec3(0.985, 0.983, 1.0), vec3(0.905, 0.895, 0.955), smoothstep(-0.9, 1.0, -sp.y));
+    // the prism's light thrown softly on the tile
+    tile += vec3(0.62, 0.40, 1.0) * 0.10 * exp(-dot(sp * vec2(1.0, 1.2), sp * vec2(1.0, 1.2)) * 2.2);
+    // a hairline edge and a top highlight, like Apple's glass tiles
+    float edge = exp(-pow((s - 0.985) / 0.012, 2.0));
+    tile += vec3(1.0) * edge * 0.35 * smoothstep(-0.2, 0.8, sp.y);
+    tile -= vec3(0.08) * edge * smoothstep(0.2, -0.8, sp.y);
+    // macOS drop shadow
+    vec2 shp = (uv - vec2(0.0, -0.022)) / 0.8047;
+    float shadow = (1.0 - smoothstep(0.93, 1.07, squircle(shp))) * 0.30;
+    bg = vec4(tile * inside, inside);
+    bg = bg + vec4(0.0, 0.0, 0.0, shadow) * (1.0 - bg.a);
+  }
+
+  if (!hit) return bg;
+  vec3 p = ro + rd * t;
+  vec3 n = nrm(p);
+  float fr = 0.04 + 0.96 * pow(1.0 - max(dot(-rd, n), 0.0), 5.0);
+  vec3 refl = env(reflect(rd, n));
+  vec3 refr = throughGlass(p, rd, n);
+  vec3 col = mix(refr, refl, fr);
+  // a sharp key highlight along the bevels
+  vec3 L = normalize(vec3(-0.4, 0.8, 0.6));
+  col += vec3(1.0) * pow(max(dot(reflect(rd, n), L), 0.0), 80.0) * 0.9;
+  col = 1.0 - exp(-col * 1.25);                        // soft tone curve
+  col = pow(col, vec3(0.95));
+  return vec4(col, 1.0);
+}
+
+void main(){
+  R = rz(uRoll) * rx(uPitch) * ry(uYaw);
+  vec4 acc = vec4(0.0);
+  // 2x2 rotated-grid supersampling
+  vec2 offs[4] = vec2[4](vec2(0.125, 0.375), vec2(0.375, -0.125), vec2(-0.125, -0.375), vec2(-0.375, 0.125));
+  for (int i = 0; i < 4; i++) {
+    vec4 c = shade(gl_FragCoord.xy + offs[i]);
+    acc += c;                                    // everything is premultiplied already
+  }
+  acc /= 4.0;
+  o = acc;
+}`;
+
+const cv = document.getElementById("c");
+const gl = cv.getContext("webgl2", { premultipliedAlpha: true, preserveDrawingBuffer: true, alpha: true, antialias: false });
+const VS = `#version 300 es
+in vec2 p; void main(){ gl_Position = vec4(p, 0., 1.); }`;
+const prog = gl.createProgram();
+for (const [t, s] of [[gl.VERTEX_SHADER, VS], [gl.FRAGMENT_SHADER, FS]]) {
+  const sh = gl.createShader(t); gl.shaderSource(sh, s); gl.compileShader(sh);
+  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) { document.body.textContent = "ERR " + gl.getShaderInfoLog(sh); throw 0; }
+  gl.attachShader(prog, sh);
+}
+gl.linkProgram(prog); gl.useProgram(prog);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+const u = (n) => gl.getUniformLocation(prog, n);
+gl.uniform2f(u("uRes"), cv.width, cv.height);
+gl.uniform1i(u("uMode"), MODE);
+gl.uniform1f(u("uYaw"), P("yaw", 0.5));
+gl.uniform1f(u("uPitch"), P("pitch", 0.25));
+gl.uniform1f(u("uRoll"), P("roll", 0.0));
+gl.uniform1f(u("uDisp"), P("disp", 0.26));
+gl.uniform1f(u("uBack"), P("back", 1.25));
+gl.uniform1f(u("uBar"), P("bar", 1.0));
+gl.uniform1f(u("uSpread"), P("spread", 5.0));
+gl.uniform1f(u("uLift"), P("lift", 0.15));
+gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+gl.enable(gl.SCISSOR_TEST);
+const STRIPS = 16;
+for (let i = 0; i < STRIPS; i++) {
+  gl.scissor(0, (i * cv.height) / STRIPS, cv.width, cv.height / STRIPS);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.finish();
+}
+if (DUMP) document.body.textContent = "DATA:" + cv.toDataURL("image/png");
+</script></body></html>

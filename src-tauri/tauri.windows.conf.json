@@ -1,0 +1,19 @@
+{
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Prism",
+        "width": 380,
+        "height": 600,
+        "resizable": false,
+        "maximizable": false,
+        "center": true,
+        "decorations": false,
+        "backgroundColor": "#050505",
+        "dragDropEnabled": false
+      }
+    ]
+  },
+  "bundle": { "resources": { "resources/wintun.dll": "wintun.dll" } }
+}

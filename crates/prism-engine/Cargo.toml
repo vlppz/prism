@@ -1,0 +1,23 @@
+[package]
+name = "prism-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+boringtun = { version = "0.7", default-features = false }
+tun-rs = { version = "2", features = ["async"] }
+socket2 = { version = "0.6", features = ["all"] }
+rand = "0.9"
+base64 = "0.22"
+parking_lot = "0.12"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis"] }

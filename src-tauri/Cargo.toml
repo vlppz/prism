@@ -1,0 +1,31 @@
+[package]
+name = "prism"
+description = "Prism — one-button WireGuard that gets past DPI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "prism"
+
+[lib]
+name = "prism_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+prism-engine.workspace = true
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+parking_lot = "0.12"
+rand = "0.9"
+# key display in the details sheet (the engine itself stays untouched)
+base64 = "0.22"
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
