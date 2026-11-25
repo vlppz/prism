@@ -617,10 +617,12 @@ let toastTimer = 0;
 function toast(msg: string, kind: "error" | "info" = "error") {
   const el = $("toast");
   el.textContent = msg;
-  el.classList.toggle("info", kind === "info");
+  // "note", not "info": .info is the details button, whose styles it would take
+  el.classList.toggle("note", kind === "info");
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => el.classList.remove("show"), 5200);
+  // a confirmation is read at a glance; an error needs time
+  toastTimer = window.setTimeout(() => el.classList.remove("show"), kind === "info" ? 1500 : 5200);
 }
 
 // ---------- details: what the WireGuard app shows ----------
@@ -1001,7 +1003,11 @@ setTimeout(() => {
     void openSheet(true);
   }
 }, android ? 1200 : 0);
-if (dev?.has("toast")) toast(dev.get("toast") || "server.conf: The [Peer] section has no Endpoint.");
+if (dev?.has("toast"))
+  setTimeout(
+    () => toast(dev.get("toast") || "server.conf: The [Peer] section has no Endpoint.", dev.has("info") ? "info" : "error"),
+    android ? 1300 : 0,
+  );
 if (dev?.has("drag")) document.body.classList.add("dragging");
 // `sim=connecting:1.2,ripple,connected:0.4` plays orb states forward and freezes on that frame
 for (const part of dev?.get("sim")?.split(",") ?? []) {
