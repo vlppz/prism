@@ -133,6 +133,10 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      # caches Gradle and its dependencies: fewer downloads from Maven Central,
+      # which rate-limits shared runners (HTTP 429)
+      - uses: gradle/actions/setup-gradle@v5
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -165,7 +169,12 @@ jobs:
         run: |
           # the runner's preinstalled NDK (a machine variable, not in `env.`)
           export NDK_HOME="$ANDROID_NDK_LATEST_HOME"
-          pnpm --dir ui tauri android build --apk --ci --target aarch64 armv7 x86_64
+          # one retry: a refused dependency download is usually gone a minute later
+          pnpm --dir ui tauri android build --apk --ci --target aarch64 armv7 x86_64 || {
+            echo "::warning::Android build failed, retrying once in 60 s"
+            sleep 60
+            pnpm --dir ui tauri android build --apk --ci --target aarch64 armv7 x86_64
+          }
 
       - name: Collect the APK
         run: |
