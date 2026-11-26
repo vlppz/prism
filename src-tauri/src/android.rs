@@ -58,6 +58,11 @@ pub async fn connect() -> Result<()> {
     call::<serde_json::Value>("connect", (), 15).await.map(drop)
 }
 
+/// Asks the VPN service (in its own process) to disconnect.
+pub async fn disconnect() {
+    let _ = call::<serde_json::Value>("disconnect", (), 5).await;
+}
+
 pub fn open_url(url: &str) {
     if let Ok(p) = plugin() {
         let _ = p.run_mobile_plugin::<serde_json::Value>("openUrl", serde_json::json!({ "url": url }));

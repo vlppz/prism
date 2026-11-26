@@ -170,6 +170,9 @@ export class Orb {
   private still = window.matchMedia("(prefers-reduced-motion: reduce)");
   private focused = document.hasFocus();
 
+  /** Frame-rate cap while awake (the value is 1/min frame gap; 75 lets 60 Hz through). */
+  static awakeFps = 75;
+
   /** Render resolution cap: the orb is soft, so phones use less (main.ts). */
   static maxDpr = 2;
 
@@ -321,7 +324,7 @@ export class Orb {
     // Nothing is easing: the sleeping ring only drifts, 30 fps is plenty; and
     // a window in the background never needs more than that either. Awake, the
     // swirl gets 60 fps even where the display would offer 120.
-    if (elapsed < (settled && (asleep || !this.focused) ? 1 / 31 : 1 / 75)) return;
+    if (elapsed < (settled && (asleep || !this.focused) ? 1 / 31 : 1 / Orb.awakeFps)) return;
     this.last = now;
     this.step(Math.min(elapsed, 0.1));
     this.draw();

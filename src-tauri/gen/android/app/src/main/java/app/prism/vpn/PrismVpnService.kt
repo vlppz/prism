@@ -4,8 +4,10 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.IpPrefix
@@ -14,6 +16,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -40,6 +43,10 @@ object PrismNative {
     @JvmStatic external fun isRunning(): Boolean
     @JvmStatic external fun hasConfig(dataDir: String): Boolean
     @JvmStatic external fun networkChanged()
+    /** VPN process: open the session socket the window connects to. */
+    @JvmStatic external fun serve(dataDir: String)
+    /** Window process: on screen or not (per-second figures only when on). */
+    @JvmStatic external fun setForeground(on: Boolean)
 }
 
 /**
@@ -55,7 +62,9 @@ class PrismVpnService : VpnService() {
         const val ACTION_DISCONNECT = "app.prism.vpn.SERVICE_DISCONNECT"
         private const val CHANNEL = "connection"
         private const val NOTE_ID = 1
-        private const val PREFS = "prism"
+        // its own file: preferences are cached per process, and the window
+        // process writes "prism"
+        private const val PREFS = "vpn"
         /** Set while a session should be up: after Android kills Prism, it comes back. */
         private const val WANT_ON = "wantOn"
 
@@ -82,10 +91,18 @@ class PrismVpnService : VpnService() {
     private var callback: ConnectivityManager.NetworkCallback? = null
     private var last: Triple<Long, Long, Long>? = null // time, rx, tx
 
+    override fun onCreate() {
+        super.onCreate()
+        // this runs in its own process (":vpn"), apart from the window's
+        PrismNative.serve(dataDir.absolutePath)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_DISCONNECT -> {
                 disconnect(this)
+                // started just to deliver this: nothing to watch
+                if (!polling) stopSelf()
                 return START_NOT_STICKY
             }
             // the app, the tile, or the system's always-on VPN
@@ -166,7 +183,7 @@ class PrismVpnService : VpnService() {
     }
 
     override fun onDestroy() {
-        polling = false
+        stopPolling()
         main.removeCallbacksAndMessages(null)
         stopNetworkWatch()
         PrismTileService.refresh(this)
@@ -175,27 +192,72 @@ class PrismVpnService : VpnService() {
 
     // ---------- status: notification, tile, and stopping when the session ends ----------
 
+    /** What the notification shows now; it's reposted only when this changes. */
+    private var shown: String? = null
+
+    /**
+     * Battery: every post makes the system redraw the notification. With the
+     * screen on it refreshes every 2 s; with it off nobody sees it, so the
+     * loop only checks every 15 s whether the session ended, and the screen
+     * coming back on refreshes it at once.
+     */
+    private val tick = object : Runnable {
+        override fun run() {
+            if (!polling) return
+            val s = JSONObject(PrismNative.status())
+            if (s.optString("state") == "off" && !connecting) {
+                finish(s.optString("error"))
+                return
+            }
+            val awake = getSystemService(PowerManager::class.java)?.isInteractive != false
+            if (awake) {
+                val n = buildNotification(s)
+                val key = "${n.extras.getCharSequence(Notification.EXTRA_TITLE)}|${n.extras.getCharSequence(Notification.EXTRA_TEXT)}"
+                if (key != shown) {
+                    shown = key
+                    getSystemService(NotificationManager::class.java)?.notify(NOTE_ID, n)
+                }
+            } else {
+                // speeds are measured afresh once the screen is back
+                last = null
+            }
+            main.postDelayed(this, if (awake) 2000 else 15000)
+        }
+    }
+
+    private val screenOn = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (!polling) return
+            // take a baseline now, show speeds a second later
+            val s = JSONObject(PrismNative.status())
+            rates(s.optLong("rx"), s.optLong("tx"))
+            main.removeCallbacks(tick)
+            main.postDelayed(tick, 1000)
+        }
+    }
+
     private fun startPolling() {
         if (polling) return
         polling = true
-        main.post(object : Runnable {
-            override fun run() {
-                if (!polling) return
-                val s = JSONObject(PrismNative.status())
-                if (s.optString("state") == "off" && !connecting) {
-                    finish(s.optString("error"))
-                    return
-                }
-                getSystemService(NotificationManager::class.java)?.notify(NOTE_ID, buildNotification(s))
-                main.postDelayed(this, 1000)
-            }
-        })
+        shown = null
+        ContextCompat.registerReceiver(this, screenOn, IntentFilter(Intent.ACTION_SCREEN_ON), ContextCompat.RECEIVER_NOT_EXPORTED)
+        main.post(tick)
         PrismTileService.refresh(this)
+    }
+
+    private fun stopPolling() {
+        if (!polling) return
+        polling = false
+        main.removeCallbacks(tick)
+        try {
+            unregisterReceiver(screenOn)
+        } catch (_: IllegalArgumentException) {
+        }
     }
 
     /** The session is over: drop the notification and the service. */
     private fun finish(error: String) {
-        polling = false
+        stopPolling()
         setWanted(this, false)
         stopNetworkWatch()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true)

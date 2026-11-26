@@ -1,17 +1,23 @@
-//! The Android session, owned by the process instead of the window.
+//! The Android session. It lives in the VPN service's own process (":vpn"),
+//! apart from the window's: swiping Prism away ends the window's process
+//! (Tauri exits with its last window) and the tunnel doesn't notice.
 //!
-//! The VPN service (PrismVpnService.kt) drives it: it asks for a [`plan`],
-//! brings the interface up and hands the fd to [`run`]. So the tunnel starts
-//! the same way from the app, the Quick Settings tile or a restart after
-//! Android killed the process, and keeps running with no window at all. The
-//! app, when it is open, only watches through [`set_hook`] and asks to stop.
+//! The service (PrismVpnService.kt) drives it: it asks for a [`plan`], brings
+//! the interface up and hands the fd to [`run`]. So the tunnel starts the same
+//! way from the app, the Quick Settings tile or a restart after Android killed
+//! the process. The window, when open, follows it over a Unix socket in the
+//! app's data directory ([`serve`]; the other end is android_link.rs): one
+//! JSON line per change, and it can send `stop` and `fg 0|1`.
 //!
 //! Everything Kotlin calls is a `PrismNative` JNI function at the bottom.
 
+use std::io::{BufRead, BufReader, Write};
 use std::os::fd::FromRawFd;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::LazyLock;
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{sync_channel, SyncSender};
+use std::sync::{Arc, LazyLock, Once};
 use std::time::Duration;
 
 use anyhow::{bail, Context, Result};
@@ -43,12 +49,17 @@ impl Default for Snap {
     }
 }
 
-pub enum Note {
-    Status(Snap),
-    Stats { rx: u64, tx: u64, handshake_age: Option<u64>, level: u8 },
-}
+/// The socket the window connects to, in the app's data directory.
+pub const SOCKET: &str = "core.sock";
 
-type Hook = Box<dyn Fn(Note) + Send + Sync>;
+/// A connected window.
+struct Client {
+    /// Lines to write; a window that doesn't read (frozen in the background)
+    /// loses lines instead of stalling the tunnel.
+    tx: SyncSender<String>,
+    /// On screen: wants the per-second traffic figures.
+    fg: Arc<AtomicBool>,
+}
 
 struct Running {
     stop: watch::Sender<bool>,
@@ -64,7 +75,7 @@ struct Core {
     snap: Mutex<Snap>,
     pending: Mutex<Option<Pending>>,
     running: Mutex<Option<Running>>,
-    hook: Mutex<Option<Hook>>,
+    clients: Mutex<Vec<Client>>,
     /// Bumped by every start and stop, so a finished session's last words
     /// can't overwrite a newer one's state.
     generation: AtomicU64,
@@ -80,7 +91,7 @@ static CORE: LazyLock<Core> = LazyLock::new(|| Core {
     snap: Mutex::new(Snap::default()),
     pending: Mutex::new(None),
     running: Mutex::new(None),
-    hook: Mutex::new(None),
+    clients: Mutex::new(Vec::new()),
     generation: AtomicU64::new(0),
 });
 
@@ -88,10 +99,21 @@ fn now_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
-fn notify(note: Note) {
-    if let Some(h) = CORE.hook.lock().as_ref() {
-        h(note);
-    }
+fn status_line(s: &Snap) -> String {
+    let mut v = serde_json::to_value(s).unwrap_or_default();
+    v["t"] = "status".into();
+    v.to_string()
+}
+
+/// Sends a line to the connected windows (`stats_only`: just those on screen),
+/// dropping any that went away.
+fn broadcast(line: String, stats_only: bool) {
+    CORE.clients.lock().retain(|c| {
+        if stats_only && !c.fg.load(Ordering::Relaxed) {
+            return true;
+        }
+        !matches!(c.tx.try_send(line.clone()), Err(std::sync::mpsc::TrySendError::Disconnected(_)))
+    });
 }
 
 fn update(f: impl FnOnce(&mut Snap)) {
@@ -100,12 +122,56 @@ fn update(f: impl FnOnce(&mut Snap)) {
         f(&mut s);
         s.clone()
     };
-    notify(Note::Status(snap));
+    broadcast(status_line(&snap), false);
 }
 
-/// The open app follows the session through this.
-pub fn set_hook(hook: impl Fn(Note) + Send + Sync + 'static) {
-    *CORE.hook.lock() = Some(Box::new(hook));
+/// Listens for the window (once per process).
+pub fn serve(data_dir: &str) {
+    static STARTED: Once = Once::new();
+    let path = Path::new(data_dir).join(SOCKET);
+    STARTED.call_once(move || {
+        let _ = std::fs::remove_file(&path);
+        let listener = match UnixListener::bind(&path) {
+            Ok(l) => l,
+            Err(e) => return eprintln!("core socket {}: {e}", path.display()),
+        };
+        std::thread::Builder::new()
+            .name("prism-core-sock".into())
+            .spawn(move || {
+                for stream in listener.incoming().flatten() {
+                    accept(stream);
+                }
+            })
+            .ok();
+    });
+}
+
+fn accept(stream: UnixStream) {
+    let Ok(mut writer) = stream.try_clone() else { return };
+    let (tx, rx) = sync_channel::<String>(64);
+    let fg = Arc::new(AtomicBool::new(true));
+    // the current state first, then every change
+    let _ = tx.try_send(status_line(&snapshot()));
+    CORE.clients.lock().push(Client { tx, fg: fg.clone() });
+    std::thread::spawn(move || {
+        for mut line in rx {
+            line.push('\n');
+            if writer.write_all(line.as_bytes()).is_err() {
+                break;
+            }
+        }
+    });
+    std::thread::spawn(move || {
+        for line in BufReader::new(stream).lines() {
+            let Ok(line) = line else { break };
+            match line.trim() {
+                "stop" => stop_blocking(),
+                "fg 1" => fg.store(true, Ordering::Relaxed),
+                "fg 0" => fg.store(false, Ordering::Relaxed),
+                _ => {}
+            }
+        }
+    });
 }
 
 pub fn snapshot() -> Snap {
@@ -199,7 +265,8 @@ fn on_event(e: Event) {
                 s.rx = rx;
                 s.tx = tx;
             }
-            notify(Note::Stats { rx, tx, handshake_age, level });
+            let line = serde_json::json!({ "t": "stats", "rx": rx, "tx": tx, "handshakeAge": handshake_age, "level": level });
+            broadcast(line.to_string(), true);
         }
         Event::Log { line } => eprintln!("[prism] {line}"),
     }
@@ -235,13 +302,6 @@ pub fn stop_blocking() {
             let _ = tx.send(());
         });
         let _ = rx.recv_timeout(Duration::from_secs(11));
-    }
-}
-
-/// Same, from async code.
-pub async fn stop() {
-    if let Some(done) = begin_stop() {
-        let _ = tokio::time::timeout(Duration::from_secs(10), done).await;
     }
 }
 
@@ -314,6 +374,13 @@ mod jni_api {
     pub extern "system" fn Java_app_prism_vpn_PrismNative_hasConfig(mut env: JNIEnv, _: JClass, dir: JString) -> jboolean {
         let dir = string(&mut env, &dir);
         jbool(super::has_config(&dir))
+    }
+
+    /// The service is up: let the window connect.
+    #[no_mangle]
+    pub extern "system" fn Java_app_prism_vpn_PrismNative_serve(mut env: JNIEnv, _: JClass, dir: JString) {
+        let dir = string(&mut env, &dir);
+        super::serve(&dir);
     }
 
     #[no_mangle]

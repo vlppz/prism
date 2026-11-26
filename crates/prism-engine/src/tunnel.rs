@@ -423,7 +423,7 @@ async fn watch_link(
                 }
             }
             Some(h) => {
-                if h > DEAD_AFTER {
+                if h > DEAD_AFTER && dead_if_quiet(&hist, tx) {
                     return Outcome::Dead;
                 }
                 set_phase(Phase::Connected);
@@ -488,7 +488,7 @@ impl Link {
             x25519::PublicKey::from(cfg.peer.public_key),
             cfg.peer.preshared_key,
             // keepalives keep NAT open and let rekeys reveal a dead link
-            Some(cfg.peer.keepalive.unwrap_or(25)),
+            keepalive(cfg),
             rand::random::<u32>() >> 8,
             None,
         );
@@ -693,7 +693,7 @@ async fn timers(tunn: Arc<Mutex<Tunn>>, wire: Arc<Wire>) {
         wire.send(&dst[o..o + l], &mut scratch).await;
     }
 
-    let mut tick = tokio::time::interval(Duration::from_millis(250));
+    let mut tick = tokio::time::interval(TIMER_TICK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         tick.tick().await;
@@ -727,4 +727,39 @@ pub fn validate(text: &str) -> Result<WgConfig> {
         bail!("empty Endpoint");
     }
     Ok(cfg)
+}
+
+/// How often WireGuard's timers are serviced (rekeys, keepalives, retries).
+/// Phones wake once a second, for the battery; WireGuard needs no finer.
+#[cfg(target_os = "android")]
+const TIMER_TICK: Duration = Duration::from_secs(1);
+#[cfg(not(target_os = "android"))]
+const TIMER_TICK: Duration = Duration::from_millis(250);
+
+
+/// Keepalive interval. Desktop always sends one (keeps NAT open, lets rekeys
+/// reveal a dead link). On a phone each one wakes the cellular radio, which
+/// then idles at high power for seconds: every 25 s that never lets it rest.
+/// So phones send them only when the config asks, like WireGuard's own app.
+#[cfg(target_os = "android")]
+fn keepalive(cfg: &WgConfig) -> Option<u16> {
+    cfg.peer.keepalive.filter(|k| *k > 0)
+}
+#[cfg(not(target_os = "android"))]
+#[inline(always)]
+fn keepalive(cfg: &WgConfig) -> Option<u16> {
+    Some(cfg.peer.keepalive.unwrap_or(25))
+}
+
+/// An old handshake means a dead link only if something tried to go out.
+/// Without keepalives an idle phone's handshake simply ages, and relinking
+/// then (junk, a fresh handshake) would only wake the radio for nothing.
+#[cfg(target_os = "android")]
+fn dead_if_quiet(hist: &VecDeque<(u64, u64)>, tx: u64) -> bool {
+    hist.front().map_or(true, |&(tx0, _)| tx > tx0)
+}
+#[cfg(not(target_os = "android"))]
+#[inline(always)]
+fn dead_if_quiet(_hist: &VecDeque<(u64, u64)>, _tx: u64) -> bool {
+    true
 }

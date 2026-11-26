@@ -64,8 +64,11 @@
             android:screenOrientation="fullSensor"
             tools:replace="screenOrientation" />
 
+        <!-- The tile and the VPN run in their own process: swiping Prism away
+             from recent apps ends the window's process, not the tunnel. -->
         <service
             android:name=".PrismTileService"
+            android:process=":vpn"
             android:exported="true"
             android:icon="@drawable/ic_tile"
             android:label="Prism"
@@ -80,6 +83,7 @@
 
         <service
             android:name=".PrismVpnService"
+            android:process=":vpn"
             android:exported="false"
             android:foregroundServiceType="specialUse"
             android:permission="android.permission.BIND_VPN_SERVICE">

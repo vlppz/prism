@@ -75,8 +75,12 @@ const dev = import.meta.env.DEV ? new URLSearchParams(location.hash.slice(1)) : 
 if (dev?.has("frame")) document.documentElement.style.cssText = "width:380px;height:600px";
 const canvas = $<HTMLCanvasElement>("orb");
 const power = $<HTMLButtonElement>("power");
-// phones: the soft orb looks the same at 1.5x and leaves the GPU to the animations
-if (android) Orb.maxDpr = 1.5;
+// phones: the soft orb looks the same at 1.5x and leaves the GPU to the animations;
+// its slow swirl needs no more than 30 fps (battery)
+if (android) {
+  Orb.maxDpr = 1.5;
+  Orb.awakeFps = 32;
+}
 // `t=<seconds>` pins the shader clock so a screenshot can be reproduced
 const orb = dev?.has("nogl") ? null : Orb.create(canvas, dev?.has("t") ? Number(dev.get("t")) : undefined);
 if (!orb) document.body.classList.add("no-gl");
@@ -203,6 +207,11 @@ function renderStatus() {
 }
 
 function onStats(st: Stats) {
+  // nobody's looking: skip the work, and start the rate afresh on return
+  if (document.hidden) {
+    prev = null;
+    return;
+  }
   const now = performance.now();
   if (prev) {
     const dt = (now - prev.t) / 1000;
@@ -723,7 +732,7 @@ function renderSheet() {
 
 /** Ticks the live rows without rebuilding the sheet. */
 function liveSheet() {
-  if (!sheetOpen()) return;
+  if (!sheetOpen() || document.hidden) return;
   const set = (id: string, v: string) => {
     const e = document.getElementById(id);
     if (e && e.textContent !== v) e.textContent = v;

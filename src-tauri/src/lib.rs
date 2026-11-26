@@ -4,6 +4,8 @@
 mod android;
 #[cfg(target_os = "android")]
 mod android_core;
+#[cfg(target_os = "android")]
+mod android_link;
 #[cfg(any(target_os = "android", test))]
 mod plan;
 mod qr;
@@ -23,7 +25,9 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::menu::Submenu;
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
+#[cfg(desktop)]
+use tauri::RunEvent;
+use tauri::{AppHandle, Emitter, Manager, State};
 #[cfg(desktop)]
 use tauri::{WindowEvent, Wry};
 use tokio::sync::mpsc;
@@ -239,11 +243,11 @@ async fn connect(app: AppHandle, state: State<'_, AppState>) -> CmdResult<()> {
 }
 
 async fn do_connect(app: &AppHandle, state: &AppState) -> CmdResult<()> {
-    // Android: the VPN service owns the session; status comes back through
-    // the core's hook (see `run`)
+    // Android: the VPN service (its own process) owns the session; status
+    // comes back over the session socket (android_link.rs)
     #[cfg(target_os = "android")]
     {
-        if android_core::is_running() {
+        if state.status.lock().state != "off" {
             return Ok(());
         }
         let index = state.store.index();
@@ -251,7 +255,9 @@ async fn do_connect(app: &AppHandle, state: &AppState) -> CmdResult<()> {
         set_status(app, |s| *s = Status { state: "connecting", config_id: Some(id), ..Default::default() });
         let started = async {
             android::prepare().await?;
-            android::connect().await
+            android::connect().await?;
+            android_link::expect_service();
+            anyhow::Ok(())
         };
         if let Err(e) = started.await {
             let msg = e.to_string();
@@ -298,7 +304,10 @@ async fn do_disconnect(app: &AppHandle, state: &AppState) {
     #[cfg(target_os = "android")]
     {
         let _ = state;
-        android_core::stop().await;
+        if !android_link::stop() {
+            // not linked to the VPN process: ask its service directly
+            android::disconnect().await;
+        }
         set_status(app, |s| *s = Status { state: "off", config_id: s.config_id.take(), error: None, since: None });
         return;
     }
@@ -520,28 +529,6 @@ fn background(theme: tauri::Theme) -> tauri::window::Color {
     }
 }
 
-/// Android: mirrors the session the VPN service runs (it may have started
-/// from the tile, or before this window existed).
-#[cfg(target_os = "android")]
-fn follow_android_session(app: &AppHandle) {
-    fn apply(app: &AppHandle, snap: android_core::Snap) {
-        set_status(app, |s| {
-            *s = Status { state: snap.state, config_id: snap.config_id, error: snap.error, since: snap.since }
-        });
-    }
-    let handle = app.clone();
-    android_core::set_hook(move |note| match note {
-        android_core::Note::Status(snap) => apply(&handle, snap),
-        android_core::Note::Stats { rx, tx, handshake_age, level } => {
-            let _ = handle.emit("stats", Stats { rx, tx, handshake_age, level });
-        }
-    });
-    let snap = android_core::snapshot();
-    if snap.state != "off" {
-        apply(app, snap);
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();
@@ -584,7 +571,7 @@ pub fn run() {
                 tray_toggle: Default::default(),
             });
             #[cfg(target_os = "android")]
-            follow_android_session(app.handle());
+            android_link::start(app.handle().clone(), app.path().app_data_dir()?);
             #[cfg(desktop)]
             {
                 setup_tray(app.handle())?;
@@ -620,6 +607,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Prism");
 
+    // Android: the window closing (swiped away) ends only this process; the
+    // VPN runs in its own and must not be touched.
+    #[cfg(mobile)]
+    app.run(|_, _| {});
+    #[cfg(desktop)]
     app.run(|app, event| match event {
         #[cfg(target_os = "macos")]
         RunEvent::Reopen { .. } => show_main(app),

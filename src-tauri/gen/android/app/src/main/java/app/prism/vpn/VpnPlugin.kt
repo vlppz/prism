@@ -43,7 +43,22 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
     @Volatile
     private var opened: Intent? = null
 
+    private var web: WebView? = null
+
+    // Battery: out of sight, the page's timers stop and the per-second
+    // traffic figures stop being sent to it (the VPN itself keeps running).
+    override fun onPause(activity: AppCompatActivity) {
+        PrismNative.setForeground(false)
+        web?.pauseTimers()
+    }
+
+    override fun onResume(activity: AppCompatActivity) {
+        web?.resumeTimers()
+        PrismNative.setForeground(true)
+    }
+
     override fun load(webView: WebView) {
+        web = webView
         keep(activity.intent)
         // Back closes the page's open sheet; with none open Prism goes to the
         // background instead of closing (the VPN keeps running either way)
@@ -155,6 +170,16 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
         val on = connectRequested
         connectRequested = false
         invoke.resolve(JSObject().put("connect", on))
+    }
+
+    /** The window couldn't reach the VPN process over its socket: tell the service. */
+    @Command
+    fun disconnect(invoke: Invoke) {
+        try {
+            activity.startService(Intent(activity, PrismVpnService::class.java).setAction(PrismVpnService.ACTION_DISCONNECT))
+        } catch (_: Exception) {
+        }
+        invoke.resolve()
     }
 
     @Command
