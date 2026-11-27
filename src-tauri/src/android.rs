@@ -113,3 +113,8 @@ pub async fn take_connect() -> Result<bool> {
     Ok(call::<Connect>("takeConnect", (), 10).await?.connect)
 }
 
+
+/// Plays a haptic effect; fire and forget.
+pub async fn haptic(kind: &str, ms: u32) {
+    let _ = call::<serde_json::Value>("haptic", serde_json::json!({ "kind": kind, "ms": ms }), 2).await;
+}

@@ -203,6 +203,16 @@ async fn take_connect() -> bool {
     false
 }
 
+/// Android: a haptic effect (Haptics.kt): a system click kind, or the orb's
+/// "charge" (lasting `ms`), "burst" and "cancel". Elsewhere it does nothing.
+#[tauri::command]
+async fn haptic(kind: String, ms: Option<u32>) {
+    #[cfg(target_os = "android")]
+    android::haptic(&kind, ms.unwrap_or(0)).await;
+    #[cfg(not(target_os = "android"))]
+    let _ = (kind, ms);
+}
+
 /// Android: the clipboard's text (pages can't read it without a prompt).
 #[tauri::command]
 async fn paste_text() -> CmdResult<String> {
@@ -602,6 +612,7 @@ pub fn run() {
             decode_qr,
             scan_qr,
             take_connect,
+            haptic,
             rename
         ])
         .build(tauri::generate_context!())

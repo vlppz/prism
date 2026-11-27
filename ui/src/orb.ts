@@ -11,7 +11,8 @@ void main() { gl_Position = vec4(p, 0.0, 1.0); }`;
 const FRAG = `#version 300 es
 precision highp float;
 uniform vec2 uRes;
-uniform float uTime, uEnergy, uSpin, uWarm, uHover, uPress, uRipple, uRadius, uLight;
+uniform float uTime, uEnergy, uSpin, uWarm, uHover, uPress, uRipple, uRadius, uLight, uCharge, uBurst;
+uniform vec2 uShake;
 out vec4 outColor;
 
 const float PI = 3.14159265;
@@ -21,6 +22,11 @@ float hash(vec2 p) {
   p = fract(p * vec2(443.897, 441.423));
   p += dot(p, p.yx + 19.19);
   return fract((p.x + p.y) * p.x);
+}
+
+// a fully saturated hue, 0..1 around the wheel
+vec3 spectrum(float x) {
+  return clamp(abs(fract(x + vec3(0.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0) - 1.0, 0.0, 1.0);
 }
 
 // A slowly flowing field of silk, defined on the 3D surface of the ball, so it
@@ -36,15 +42,28 @@ vec3 silk(vec3 n, float t) {
 
 void main() {
   float half_ = 0.5 * min(uRes.x, uRes.y);
-  vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / half_;
-  float E = uEnergy, t = uTime;
+  vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / half_ - uShake;
+  float t = uTime;
+
+  // hold to charge (Android): the ball wakes, tightens and splits its light
+  // into the full spectrum; at the top it bursts (uBurst runs 0 -> 1)
+  float ch = uCharge, ch2 = ch * ch;
+  float bOn = step(uBurst, 0.9995);
+  float bf = (1.0 - uBurst) * bOn;
+  float E = mix(uEnergy, 1.0, ch) + 0.15 * ch2 + 0.6 * bf * bf * bf;
 
   // palette: pink / blue / violet, sliding to ember / amber / red when warm
   vec3 cA = mix(vec3(1.00, 0.26, 0.62), vec3(1.00, 0.36, 0.10), uWarm);
   vec3 cB = mix(vec3(0.24, 0.44, 1.00), vec3(1.00, 0.66, 0.24), uWarm);
   vec3 cC = mix(vec3(0.58, 0.34, 1.00), vec3(1.00, 0.20, 0.22), uWarm);
+  // charging, and for a while after the burst, the palette turns into a spectrum
+  float iris = max(ch2 * 0.8, bf * bf * 0.9);
+  cA = mix(cA, spectrum(t * 0.35), iris);
+  cB = mix(cB, spectrum(t * 0.35 + 0.33), iris);
+  cC = mix(cC, spectrum(t * 0.35 + 0.67), iris);
 
-  float R = uRadius * (1.0 + 0.010 * sin(t * 0.9) * E + 0.018 * uHover - 0.030 * uPress);
+  float bounce = 0.07 * exp(-uBurst * 6.0) * cos(uBurst * 22.0) * bOn;
+  float R = uRadius * (1.0 + 0.010 * sin(t * 0.9) * E + 0.018 * uHover - 0.030 * uPress - 0.06 * ch2 + bounce);
   vec2 p = uv / R;
   float r = length(p);
   float a = atan(p.y, p.x);
@@ -91,9 +110,9 @@ void main() {
   float wl = mix(2.4, 3.4, E) * uRes.y / 760.0 + 0.6;
   float line = exp(-d * d / (wl * wl));
   // a prism's signature: the rim splits slightly, red outward and blue inward
-  float ca = (0.4 + 0.6 * E) * uRes.y / 760.0;
+  float ca = (0.4 + 0.6 * E) * uRes.y / 760.0 * (1.0 + 7.0 * ch2 + 9.0 * bf * bf);
   vec3 split = vec3(exp(-(d - ca) * (d - ca) / (wl * wl)), line, exp(-(d + ca) * (d + ca) / (wl * wl)));
-  float rimI = 0.45 * mix(0.26 + 0.55 * (l1 + l2), 0.32 + 1.30 * lobes, smoothstep(0.0, 0.3, E));
+  float rimI = 0.45 * mix(0.26 + 0.55 * (l1 + l2), 0.32 + 1.30 * lobes, smoothstep(0.0, 0.3, E)) * (1.0 + 1.3 * ch2);
   col += mix(rimCol, vec3(1.0), 0.10 + 0.15 * E * lobes) * split * rimI * (1.0 + 0.5 * uHover);
   // ribbons light the glass where they touch it
   float touch = dot(plasma, vec3(0.34)) * reach * E;
@@ -104,6 +123,36 @@ void main() {
   float outside = 1.0 - inside;
   col += rimCol * exp(-o * mix(22.0, 6.0, E)) * outside * (0.05 + 0.62 * E + 0.10 * uHover) * (0.07 + lobes);
   col += mix(cA, cB, 0.5) * exp(-o * 2.6) * outside * 0.10 * E;
+
+  // charging: motes of coloured light fall into the ball from all around,
+  // more of them and faster as the charge builds
+  if (ch > 0.001) {
+    const float N = 36.0;
+    float sa = (a / TAU + 0.5) * N;
+    float id = floor(sa);
+    float h1 = hash(vec2(id, 7.31));
+    float h2 = hash(vec2(id + 13.0, 2.17));
+    float fall = fract(h2 - t * (1.1 + 0.9 * h1));           // 1 -> 0 on the way in
+    float arc = (fract(sa) - 0.5) * (TAU / N) * r;
+    float dr = r - (1.0 + 0.34 * fall);
+    float head = dr < 0.0 ? dr * dr / 0.00025 : dr / 0.045;  // a bright head, a tail behind it
+    float mote = exp(-arc * arc / 0.00016 - head);
+    float lit = (1.0 - fall) * smoothstep(0.0, 0.1, fall) * smoothstep(1.0 - ch * 1.25, 1.15 - ch * 1.25, h1);
+    col += mix(spectrum(h1 + t * 0.2), vec3(1.0), 0.25) * mote * lit * (0.6 + 1.4 * ch);
+  }
+
+  // burst: a white flash through the ball, and a ring of split light racing out
+  if (bOn > 0.0) {
+    float e = 1.0 - pow(1.0 - uBurst, 3.0);
+    float rad = 1.0 + 0.65 * e;
+    float w = 0.016 + 0.05 * uBurst;
+    float sp = 0.04 * e;
+    vec3 dw = (r - rad + vec3(-sp, 0.0, sp)) / w;           // red outermost, blue inside
+    vec3 wave = exp(-dw * dw);
+    col += wave * pow(bf, 1.5) * 1.8;
+    col += vec3(1.0, 0.96, 1.0) * inside * pow(bf, 7.0) * 1.4;
+    col += mix(cA, cB, 0.5) * exp(-o * 2.4) * outside * bf * bf * 0.8;
+  }
 
   // a hint of glass, so the sleeping orb is a dark ball and not a hole:
   // a fresnel edge and a soft window of light high on the left
@@ -157,13 +206,15 @@ export const ORB_RADIUS = 0.61;
 // wrap here without a visible seam; it keeps float precision on long uptimes.
 const TIME_WRAP = (2 * Math.PI) / 0.0001;
 
-const UNIFORMS = ["uRes", "uTime", "uEnergy", "uSpin", "uWarm", "uHover", "uPress", "uRipple", "uRadius", "uLight"] as const;
+const UNIFORMS = ["uRes", "uTime", "uEnergy", "uSpin", "uWarm", "uHover", "uPress", "uRipple", "uRadius", "uLight", "uCharge", "uBurst", "uShake"] as const;
 
 export class Orb {
   private gl: WebGL2RenderingContext;
   private u = {} as Record<(typeof UNIFORMS)[number], WebGLUniformLocation | null>;
-  private cur = { energy: 0, spin: 0, warm: 0, hover: 0, press: 0, ripple: 1, light: 0 };
-  private target = { energy: 0, spin: 0, warm: 0, hover: 0, press: 0, light: 0 };
+  private cur = { energy: 0, spin: 0, warm: 0, hover: 0, press: 0, ripple: 1, light: 0, charge: 0, burst: 1 };
+  private target = { energy: 0, spin: 0, warm: 0, hover: 0, press: 0, light: 0, charge: 0 };
+  /** Seconds a full charge takes (see charge()). */
+  private chargeTime = 1.5;
   private raf = 0;
   private last = 0;
   private time: number;
@@ -282,6 +333,21 @@ export class Orb {
     this.play();
   }
 
+  /** Hold to charge: builds linearly over `seconds`; letting go drains it fast. */
+  charge(on: boolean, seconds = this.chargeTime) {
+    this.chargeTime = seconds;
+    this.target.charge = on ? 1 : 0;
+    this.play();
+  }
+
+  /** The charge lets go all at once. */
+  burst() {
+    this.target.charge = 0;
+    this.cur.charge = 0;
+    if (!this.still.matches) this.cur.burst = 0;
+    this.play();
+  }
+
   private resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, Orb.maxDpr);
     const w = Math.round(this.canvas.clientWidth * dpr);
@@ -319,12 +385,17 @@ export class Orb {
       Math.abs(c.hover - tg.hover) < 0.004 &&
       Math.abs(c.press - tg.press) < 0.004 &&
       Math.abs(c.light - tg.light) < 0.004 &&
-      c.ripple >= 1;
+      c.ripple >= 1 &&
+      c.charge < 0.002 &&
+      !tg.charge &&
+      c.burst >= 1;
+    // charging and bursting are fast: always full frame rate
+    const hot = tg.charge > 0 || c.charge > 0.002 || c.burst < 1;
     const asleep = tg.energy < 0.35;
     // Nothing is easing: the sleeping ring only drifts, 30 fps is plenty; and
     // a window in the background never needs more than that either. Awake, the
     // swirl gets 60 fps even where the display would offer 120.
-    if (elapsed < (settled && (asleep || !this.focused) ? 1 / 31 : 1 / Orb.awakeFps)) return;
+    if (elapsed < (hot ? 1 / 75 : settled && (asleep || !this.focused) ? 1 / 31 : 1 / Orb.awakeFps)) return;
     this.last = now;
     this.step(Math.min(elapsed, 0.1));
     this.draw();
@@ -344,8 +415,14 @@ export class Orb {
     c.press += (tg.press - c.press) * (1 - Math.exp(-dt * 22));
     c.light += (tg.light - c.light) * (1 - Math.exp(-dt * 6));
     c.ripple = Math.min(1, c.ripple + dt / 1.6);
-    // time runs faster while energised, so the swirl "wakes up"
-    if (!this.still.matches) this.time += dt * 0.5 * (0.45 + 0.55 * c.energy + 0.25 * c.spin);
+    if (tg.charge > c.charge) c.charge = Math.min(tg.charge, c.charge + dt / this.chargeTime);
+    else c.charge += (tg.charge - c.charge) * (1 - Math.exp(-dt * 7));
+    c.burst = Math.min(1, c.burst + dt / 1.8);
+    const after = 1 - c.burst;
+    // time runs faster while energised, so the swirl "wakes up"; a charge spins it up hard
+    if (!this.still.matches)
+      this.time +=
+        dt * 0.5 * (0.45 + 0.55 * c.energy + 0.25 * c.spin) * (1 + 3.5 * c.charge * c.charge + 2 * after * after);
     if (this.time > TIME_WRAP) this.time -= TIME_WRAP;
   }
 
@@ -359,6 +436,12 @@ export class Orb {
     gl.uniform1f(u.uPress, c.press);
     gl.uniform1f(u.uLight, c.light);
     gl.uniform1f(u.uRipple, this.still.matches ? 1 : c.ripple);
+    gl.uniform1f(u.uCharge, c.charge);
+    gl.uniform1f(u.uBurst, c.burst);
+    // a charged ball trembles; the burst kicks it
+    const shake = this.still.matches ? 0 : c.charge ** 2.5 * 0.011 + (1 - c.burst) ** 6 * 0.025;
+    const ang = Math.random() * Math.PI * 2;
+    gl.uniform2f(u.uShake, Math.cos(ang) * shake, Math.sin(ang) * shake);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }

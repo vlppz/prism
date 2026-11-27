@@ -1,4 +1,4 @@
-import { api as apiPromise, type Details, type Index, type Item, type State, type Stats, type Status } from "./api";
+import { api as apiPromise, type Details, type Haptic, type Index, type Item, type State, type Stats, type Status } from "./api";
 import { Orb, type OrbTarget } from "./orb";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -66,6 +66,17 @@ if (android) {
     clearTimeout(fitTimer);
     fitTimer = window.setTimeout(fitPhone, 60);
   });
+}
+
+// Android: a haptic; the same kind twice in a moment (a failed connect both
+// rejects and reports its state) is felt once
+let lastBuzz = { kind: "", at: 0 };
+function buzz(kind: Haptic, ms?: number) {
+  if (!android) return;
+  const now = performance.now();
+  if (kind === lastBuzz.kind && now - lastBuzz.at < 350) return;
+  lastBuzz = { kind, at: now };
+  api.haptic(kind, ms);
 }
 
 // ---------- dev hooks (stripped from production builds) ----------
@@ -249,18 +260,27 @@ async function toggle() {
   }
 }
 
-// a real <button> sits over the sphere: click, Enter and Space all come for free
-power.addEventListener("click", (e) => {
+/** The orb was tapped: connect or disconnect (or, empty, offer the imports). */
+function tapOrb() {
   // Android has no drag & drop: the orb offers every way to import
   if (android && !index.items.length) {
-    e.stopPropagation();
+    buzz("tap");
     return openMenu(true);
   }
+  if (!busy && index.items.length) buzz(status.state === "off" ? "on" : "off");
   // the pointer is still resting on the orb: don't let the hover glyph sit on
   // top of what the click just set in motion; it returns on the next visit
   power.classList.add("spent");
   orb?.hover(false);
   void toggle();
+}
+
+// a real <button> sits over the sphere: click, Enter and Space all come for free
+// (Android touches make no click: see the hold below)
+power.addEventListener("click", (e) => {
+  // the menu it opens must not be closed by this same click
+  if (android && !index.items.length) e.stopPropagation();
+  tapOrb();
 });
 power.addEventListener("pointerenter", () => orb?.hover(true));
 power.addEventListener("pointerleave", () => {
@@ -268,13 +288,96 @@ power.addEventListener("pointerleave", () => {
   orb?.hover(false);
   orb?.press(false);
 });
-power.addEventListener("pointerdown", () => orb?.press(true));
-power.addEventListener("pointerup", () => orb?.press(false));
+power.addEventListener("pointerdown", (e) => {
+  orb?.press(true);
+  if (android && e.pointerType === "touch") holdStart(e);
+});
+power.addEventListener("pointerup", () => {
+  orb?.press(false);
+  // a short touch is the tap; a hold that charged is not
+  const tap = hold && !hold.charging && !hold.fired;
+  holdEnd();
+  if (tap) tapOrb();
+});
 power.addEventListener("focus", () => power.matches(":focus-visible") && orb?.hover(true));
 power.addEventListener("blur", () => {
   power.classList.remove("spent");
   orb?.hover(power.matches(":hover"));
 });
+
+// ---------- hold the orb (Android): it charges up, rumbling, bursts, and toggles ----------
+
+/** How long a press must last to count as a hold, and how long the charge then takes. */
+const HOLD_MS = 280;
+const CHARGE_MS = 1500;
+let hold: { timer: number; x: number; y: number; charging: boolean; fired: boolean } | null = null;
+
+function holdStart(e: PointerEvent) {
+  if (!e.isPrimary) return;
+  if (hold) holdEnd();
+  hold = { timer: window.setTimeout(beginCharge, HOLD_MS), x: e.clientX, y: e.clientY, charging: false, fired: false };
+}
+
+function beginCharge() {
+  if (!hold) return;
+  hold.charging = true;
+  document.body.classList.add("charging");
+  orb?.charge(true, CHARGE_MS / 1000);
+  buzz("charge", CHARGE_MS);
+  hold.timer = window.setTimeout(burst, CHARGE_MS);
+}
+
+function burst() {
+  if (!hold) return;
+  hold.charging = false;
+  hold.fired = true;
+  document.body.classList.remove("charging");
+  orb?.burst();
+  buzz("burst");
+  // the charge is spent on the tunnel: connect or disconnect once the flash
+  // has read (with no server yet there's nothing to connect: the burst is all)
+  setTimeout(() => {
+    if (index.items.length) void toggle();
+  }, 350);
+  // the shockwave leaves the canvas and crosses the whole screen
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const stage = power.parentElement!;
+  for (const cls of ["shock-glow", "shock", "shock late"]) {
+    const ring = document.createElement("div");
+    ring.className = cls;
+    ring.addEventListener("animationend", () => ring.remove());
+    stage.append(ring);
+  }
+}
+
+/** The finger lifted or wandered off: a charge not yet full drains away. */
+function holdEnd() {
+  if (!hold) return;
+  clearTimeout(hold.timer);
+  if (hold.charging) {
+    document.body.classList.remove("charging");
+    orb?.charge(false);
+    buzz("cancel");
+  }
+  hold = null;
+}
+
+if (android) {
+  // Touches on the orb are ours alone. Otherwise Chrome's own long press
+  // (context menu, drag) takes the touch over half a second in and cancels it
+  // mid-charge. It also means a touch makes no click: pointerup taps instead.
+  power.addEventListener("touchstart", (e) => e.cancelable && e.preventDefault(), { passive: false });
+  power.addEventListener("contextmenu", (e) => e.preventDefault());
+  power.addEventListener("pointercancel", () => {
+    orb?.press(false);
+    // should the system still take the touch, a charge under way completes
+    if (hold && !hold.charging) holdEnd();
+  });
+  // a finger that slides away before the charge starts was never holding
+  power.addEventListener("pointermove", (e) => {
+    if (hold && !hold.charging && !hold.fired && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 14) holdEnd();
+  });
+}
 
 // ---------- server picker ----------
 
@@ -433,6 +536,7 @@ function openMenu(open: boolean, focus = false) {
 
 picker.addEventListener("click", (e) => {
   e.stopPropagation();
+  buzz("tap");
   // Android has no drag & drop or paste shortcut: the menu offers both imports
   if (!index.items.length && !android) return pickFile();
   // e.detail is 0 when the click came from the keyboard
@@ -446,6 +550,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 async function chooseRow(row: HTMLElement) {
+  buzz(row.dataset.id ? "tick" : "tap");
   if (row.dataset.add) {
     openMenu(false);
     return pickFile();
@@ -478,11 +583,13 @@ menu.addEventListener("click", async (e) => {
   const t = e.target as HTMLElement;
   const ren = t.closest<HTMLElement>("[data-ren]");
   if (ren) {
+    buzz("tap");
     openMenu(false);
     return openRename(ren.dataset.ren!);
   }
   const rm = t.closest<HTMLElement>("[data-rm]");
   if (rm) {
+    buzz("heavy");
     try {
       index = await api.remove(rm.dataset.rm!);
       renderMenu();
@@ -524,6 +631,7 @@ async function importTexts(files: { text: string; name: string | null }[]) {
     }
   }
   if (ok) {
+    buzz("success");
     index = await api.list();
     renderStatus();
     if (menuOpen()) renderMenu();
@@ -624,6 +732,7 @@ document.addEventListener("paste", async (e) => {
 
 let toastTimer = 0;
 function toast(msg: string, kind: "error" | "info" = "error") {
+  if (kind === "error") buzz("error");
   const el = $("toast");
   el.textContent = msg;
   // "note", not "info": .info is the details button, whose styles it would take
@@ -781,12 +890,14 @@ async function openSheet(open: boolean) {
 
 infoBtn.addEventListener("click", (e) => {
   e.stopPropagation();
+  buzz("tap");
   void openSheet(!sheetOpen());
 });
 sheet.addEventListener("click", async (e) => {
   e.stopPropagation();
   const row = (e.target as HTMLElement).closest<HTMLElement>("[data-copy]");
   if (!row) return;
+  buzz("tick");
   try {
     await navigator.clipboard.writeText(row.dataset.copy!);
     toast("Copied", "info");
@@ -838,6 +949,7 @@ function openSettings(open: boolean) {
 
 gear.addEventListener("click", (e) => {
   e.stopPropagation();
+  buzz("tap");
   openSettings(!settingsOpen());
 });
 settings.addEventListener("click", (e) => e.stopPropagation());
@@ -848,6 +960,7 @@ document.addEventListener("keydown", (e) => {
 
 async function chooseTheme(theme: Index["theme"]) {
   if (theme === index.theme) return;
+  buzz("tick");
   index = { ...index, theme };
   renderSettings();
   applyTheme(false);
@@ -872,6 +985,7 @@ seg.addEventListener("keydown", (e) => {
 });
 smartBtn.addEventListener("click", async () => {
   const on = !index.smart;
+  buzz(on ? "on" : "off");
   index = { ...index, smart: on };
   renderSettings();
   try {
@@ -915,6 +1029,7 @@ async function saveRename() {
   if (!id || !name) return openRename(null);
   try {
     index = await api.rename(id, name);
+    buzz("tick");
     renderStatus();
     openRename(null);
   } catch (e) {
@@ -946,6 +1061,11 @@ renameInput.addEventListener("keydown", (e) => {
 
 api.onStatus((s) => {
   const wasLive = status.state !== "off";
+  // felt, not just seen: the tunnel came up, or it failed
+  if (s.state !== status.state) {
+    if (s.state === "connected") buzz("success");
+    else if (s.state === "unreachable" || (s.state === "off" && s.error)) buzz("error");
+  }
   status = s;
   renderStatus();
   if (s.state === "off") lastStats = null;
@@ -1022,6 +1142,8 @@ if (dev?.has("drag")) document.body.classList.add("dragging");
 for (const part of dev?.get("sim")?.split(",") ?? []) {
   const [st, sec] = part.split(":");
   if (st === "ripple") orb?.ripple();
+  else if (st === "charge") orb?.charge(true);
+  else if (st === "burst") orb?.burst();
   else orb?.set(ORB[st as State]);
   orb?.advance(Number(sec ?? 0));
 }

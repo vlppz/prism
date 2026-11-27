@@ -348,6 +348,76 @@ body:not(.empty) .power:not(.spent):focus-visible .glyph-power {
   transition-duration: 0.12s;
 }
 
+/* hold to charge (Android, main.ts): the glyph gets out of the way, and the
+   burst sends rings of split light across the whole screen */
+body.charging .power .glyph {
+  opacity: 0 !important;
+  transform: scale(0.6) !important;
+  transition-duration: 0.3s;
+}
+.os-android .power {
+  touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.shock,
+.shock-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 232px;
+  height: 232px;
+  margin: -116px 0 0 -116px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+.shock {
+  background: conic-gradient(#ff4d6d, #ffb347, #fff27a, #5dffa8, #4dd2ff, #6f7bff, #c86bff, #ff4d6d);
+  -webkit-mask: radial-gradient(closest-side, transparent 86%, #000 93%, transparent 100%);
+  mask: radial-gradient(closest-side, transparent 86%, #000 93%, transparent 100%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  animation: shock 1.15s cubic-bezier(0.12, 0.7, 0.25, 1) forwards;
+}
+.shock.late {
+  animation-duration: 1.5s;
+  animation-delay: 0.14s;
+}
+.shock-glow {
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.55), rgba(190, 140, 255, 0.22) 45%, transparent 72%);
+  mix-blend-mode: screen;
+  opacity: 0;
+  animation: shock-glow 0.9s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+}
+.light .shock,
+.light .shock-glow {
+  mix-blend-mode: normal;
+}
+.light .shock-glow {
+  background: radial-gradient(closest-side, rgba(200, 160, 255, 0.4), rgba(120, 160, 255, 0.14) 45%, transparent 72%);
+}
+@keyframes shock {
+  0% {
+    opacity: 0.95;
+    transform: scale(0.95) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(6.5) rotate(70deg);
+  }
+}
+@keyframes shock-glow {
+  0% {
+    opacity: 1;
+    transform: scale(0.8);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(4);
+  }
+}
+
 /* WebGL unavailable: a CSS ring stands in */
 .no-gl #orb {
   display: none;

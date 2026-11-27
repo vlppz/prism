@@ -42,6 +42,9 @@ export interface Stats {
   level: number;
 }
 
+/** Android haptics: the system's click kinds, and the orb's hold-to-charge. */
+export type Haptic = "tap" | "tick" | "on" | "off" | "success" | "error" | "heavy" | "charge" | "burst" | "cancel";
+
 export interface Api {
   list(): Promise<Index>;
   importConfig(text: string, fileName: string | null): Promise<Item>;
@@ -61,6 +64,8 @@ export interface Api {
   scanQr(): Promise<string | null>;
   /** Android: the Quick Settings tile opened Prism to connect. */
   takeConnect(): Promise<boolean>;
+  /** Android: a haptic effect (`ms`: how long "charge" lasts); a no-op elsewhere. */
+  haptic(kind: Haptic, ms?: number): void;
   setTheme(theme: Theme): Promise<Index>;
   setSmart(on: boolean): Promise<Index>;
   details(id: string): Promise<Details>;
@@ -97,6 +102,7 @@ async function tauriApi(): Promise<Api> {
     decodeQr: (image) => invoke("decode_qr", image),
     scanQr: () => invoke("scan_qr"),
     takeConnect: () => invoke("take_connect"),
+    haptic: (kind, ms) => void invoke("haptic", { kind, ms: ms ?? null }).catch(() => {}),
     setTheme: (theme) => invoke("set_theme", { theme }),
     setSmart: (on) => invoke("set_smart", { on }),
     details: (id) => invoke("details", { id }),
@@ -179,6 +185,7 @@ function mockApi(): Api {
     },
     scanQr: async () => null,
     takeConnect: async () => false,
+    haptic: () => {},
     setTheme: async (theme) => (index = { ...index, theme }),
     setSmart: async (smart) => (index = { ...index, smart }),
     serverIp: async () => "192.0.2.1",

@@ -32,6 +32,12 @@ class UrlArgs {
     var url: String = ""
 }
 
+@InvokeArg
+class HapticArgs {
+    var kind: String = ""
+    var ms: Int = 0
+}
+
 /** Rust's handle on Android (src-tauri/src/android.rs). */
 @TauriPlugin
 class VpnPlugin(private val activity: Activity) : Plugin(activity) {
@@ -179,6 +185,13 @@ class VpnPlugin(private val activity: Activity) : Plugin(activity) {
             activity.startService(Intent(activity, PrismVpnService::class.java).setAction(PrismVpnService.ACTION_DISCONNECT))
         } catch (_: Exception) {
         }
+        invoke.resolve()
+    }
+
+    @Command
+    fun haptic(invoke: Invoke) {
+        val args = invoke.parseArgs(HapticArgs::class.java)
+        Haptics.play(activity, web, args.kind, args.ms)
         invoke.resolve()
     }
 
